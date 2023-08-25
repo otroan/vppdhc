@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.pylint.main]
+
+[tool.pylint.basic]
+
+[tool.pylint."messages control"]
+disable = ["missing-function-docstring", "missing-module-docstring", "missing-class-docstring", "too-few-public-methods"]
+
+[tool.setuptools]
+packages = ['vppdhcpd']
+
+[project]
+name = "vppdhcpd"
+description="A DHCP server for VPP"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dynamic = ["version"]
+dependencies = [
+    "scapy",
+]
+authors = [
+    { name = "Ole Troan", email = "otroan@employees.org"},
+]
+readme = "README.md"
+
+[project.urls]
+repository = "https://github.com/nataasvpp/dhcp"
+
+[project.scripts]
+vppdhcpd = "vppdhcpd:main"
