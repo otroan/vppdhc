@@ -46,6 +46,10 @@ class DHCPv6PDClient():
                                                 external=f'{iapdopt.prefix}/{iapdopt.plen}')
         print('RV: ', rv)
 
+        # Install default route
+        nexthop = reply[IPv6].src
+        rv = self.vpp.api.cli_inband(cmd=f'ip route add ::/0 via {nexthop}')
+        print('RV', rv)
 
         # print('PREFIX: ', iapdopt.prefix, iapdopt.plen)
         # paths = [{'sw_if_index': self.if_index, 'table_id': 0}]
@@ -145,7 +149,7 @@ class DHCPv6PDClient():
                 state = StateMachine.BOUND
                 # Is it sufficient to just set rt to T1?
                 rt = reply[DHCP6OptIA_PD].T1
-                self.process_reply(reply[DHCP6_Reply])
+                self.process_reply(reply)
 
             reply.show2()
 
