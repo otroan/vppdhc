@@ -20,7 +20,7 @@ def version_callback(value: bool):
 async def setup_tasks(conf, vpp):
     # DHCPv4 server
     tasks = []
-    if 'dhc4server' in conf
+    if 'dhc4server' in conf:
         c = conf['dhc4server']
         if os.path.exists(c['socket']):
             os.remove(c['socket'])
