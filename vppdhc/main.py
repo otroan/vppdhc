@@ -28,7 +28,7 @@ async def setup_tasks(conf, vpp):
         dhcp_server = DHCPServer(c['socket'], conf['vpp']['socket'], vpp,
                                 c['renewal-time'], c['lease-time'], c['name-server'])
         tasks.append(dhcp_server())
-    if 'dhc6server' in conf:
+    if 'dhc6pdclient' in conf:
         # DHCPv6 PD client
         c = conf['dhc6pdclient']
         if os.path.exists(c['socket']):
@@ -37,7 +37,7 @@ async def setup_tasks(conf, vpp):
                                 vpp,
                                 c['interface'], c['internal-prefix'])
         tasks.append(pd_client())
-    await asyncio.gather(tasks)
+    await asyncio.gather(*tasks)
 
 @app.command()
 def main(config: typer.FileText,
