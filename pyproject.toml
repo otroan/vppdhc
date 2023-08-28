@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools","setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [tool.pylint.main]
@@ -9,17 +9,20 @@ build-backend = "setuptools.build_meta"
 [tool.pylint."messages control"]
 disable = ["missing-function-docstring", "missing-module-docstring", "missing-class-docstring", "too-few-public-methods"]
 
+[tool.setuptools_scm]
+write_to = "vppdhc/_version.py"
+
 [tool.setuptools]
-packages = ['vppdhcpd']
+packages = ['vppdhc']
 
 [project]
-name = "vppdhcpd"
+name = "vppdhc"
 description="A DHCP server for VPP"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
 dynamic = ["version"]
 dependencies = [
-    "scapy",
+    "scapy", "vpp_papi", "typer",
 ]
 authors = [
     { name = "Ole Troan", email = "otroan@employees.org"},
@@ -30,4 +33,4 @@ readme = "README.md"
 repository = "https://github.com/nataasvpp/dhcp"
 
 [project.scripts]
-vppdhcpd = "vppdhcpd:main"
+vppdhcd = "vppdhc.main:app"
