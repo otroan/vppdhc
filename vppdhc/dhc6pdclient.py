@@ -4,9 +4,10 @@ import asyncio
 import random
 from typing import Any
 from scapy.layers.l2 import Ether
-from scapy.layers.dhcp6 import DUID_LL, DHCP6OptClientId, DHCP6OptIA_PD
-from scapy.layers.dhcp6 import DHCP6_Solicit, DHCP6_Advertise, DHCP6_Request
-from scapy.layers.dhcp6 import DHCP6_Reply, DHCP6OptServerId, DHCP6_Renew, DHCP6OptIAPrefix
+from scapy.layers.dhcp6 import (DUID_LL, DHCP6OptClientId, DHCP6OptIA_PD,
+                                DHCP6_Solicit, DHCP6_Advertise, DHCP6_Request,
+                                DHCP6_Reply, DHCP6OptServerId, DHCP6_Renew,
+                                DHCP6OptIAPrefix, DHCP6OptStatusCode)
 from scapy.layers.inet6 import IPv6, UDP
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
@@ -39,6 +40,9 @@ class DHCPv6PDClient():
         # enum = VppEnum.vl_api_ip_neighbor_event_flags_t
         # Install blackhole route for the delegated prefix
         iapd = reply[DHCP6OptIA_PD]
+        if iapd.haslayer(DHCP6OptStatusCode):
+            print('DHCPv6 error: ', iapd[DHCP6OptStatusCode].status_code)
+            return
         iapdopt = iapd[DHCP6OptIAPrefix]
         iapdopt.show2()
         rv = self.vpp.api.npt66_binding_add_del(is_add=True, sw_if_index=self.if_index,
