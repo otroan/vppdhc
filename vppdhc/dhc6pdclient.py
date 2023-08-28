@@ -41,8 +41,8 @@ class DHCPv6PDClient():
         # Install blackhole route for the delegated prefix
         iapd = reply[DHCP6OptIA_PD]
         if iapd.haslayer(DHCP6OptStatusCode):
-            print('DHCPv6 error: ', iapd[DHCP6OptStatusCode].status_code)
-            return
+            print('DHCPv6 error: ', iapd.getlayer(DHCP6OptStatusCode))
+            raise Exception('DHCPv6 error')
         iapdopt = iapd[DHCP6OptIAPrefix]
         iapdopt.show2()
         rv = self.vpp.api.npt66_binding_add_del(is_add=True, sw_if_index=self.if_index,

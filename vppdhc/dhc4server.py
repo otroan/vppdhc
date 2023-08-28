@@ -68,9 +68,12 @@ class DHCPServer():
 
         # Allocate new address
         ip = pool.allocate(req[BOOTP].chaddr)
+        print('ALLOCATING NEW ADDRESS: ', ip)
 
         mac = req[Ether].src
         dhcp_server_ip = interface_info.ip4.ip
+        print('SERVER IP', dhcp_server_ip)
+
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
         repb.yiaddr = ip                # Your client address
