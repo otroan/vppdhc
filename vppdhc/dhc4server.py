@@ -40,6 +40,12 @@ class DHCPBinding():
         del self.bindings[chaddr]
         del self.pool[ip]
 
+    def declined(self, chaddr, ip):
+        '''Mark an IP address as declined'''
+        self.pool[ip] = 'declined'
+
+        del self.bindings[chaddr]
+
     def broadcast_address(self):
         '''Return broadcast address'''
         return self.prefix.network.broadcast_address
@@ -78,6 +84,10 @@ class DHCPServer():
         '''Process a DHCP packet'''
 
         options = options2dict(req)
+        reqip = None
+        if 'requested_addr' in options:
+            reqip = options['requested_addr']
+
         print('MESSAGE TYPE', options)
         msgtype = options['message-type']
         if msgtype == 1: # discover
@@ -85,12 +95,12 @@ class DHCPServer():
             ip = pool.allocate(req[BOOTP].chaddr)
         elif msgtype == 3: # request
             # Allocate new address
-            reqip = None
-            if 'requested_addr' in options:
-                reqip = options['requested_addr']
             ip = pool.allocate(req[BOOTP].chaddr, reqip)
             print('ALLOCATING NEW ADDRESS: ', ip)
-        elif msgtype in (4, 7):  # decline, release
+        elif msgtype == 4: # decline
+            # Address declined, like duplicate
+            pool.declined(req[BOOTP].chaddr, reqip)
+        elif msgtype == 7:  # release
             pool.release(req[BOOTP].chaddr)
             return None
         else:
