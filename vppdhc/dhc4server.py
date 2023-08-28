@@ -3,7 +3,7 @@
 import asyncio
 from typing import Any
 from scapy.layers.l2 import Ether
-from scapy.layers.dhcp import DHCP, BOOTP
+from scapy.layers.dhcp import DHCP, BOOTP, DHCPOptionsField, DHCPTypes
 from scapy.layers.inet import IP, UDP
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
@@ -18,11 +18,13 @@ class DHCPBinding():
         self.pool = {}
         self.pool[prefix.ip] = 'router'
 
-    def allocate(self, chaddr):
+    def allocate(self, chaddr, reqip=None):
         ''' find next free ip address'''
         # Iterate over ip address in IPv4Prefix
         if chaddr in self.bindings:
             return self.bindings[chaddr]
+        if reqip in self.pool and self.pool[reqip] == chaddr:
+            return reqip
         for ip in self.prefix.network.hosts():
             # Check if ip is in bindings
             if ip not in self.pool:
@@ -51,6 +53,15 @@ def vpp_callback(msg):
     '''VPP callback function'''
     print(f"Received VPP message: {msg}")
 
+def options2dict(packet):
+    '''Get DHCP message type'''
+    # Return all options in a dictionary
+    # Using a dict comprehension
+    options = {}
+    for op in packet[DHCP].options:
+        options[op[0]] = op[1]
+    return options
+
 class DHCPServer():
     def __init__(self, receive_socket, send_socket, vpp, renewal_time=600, lease_time=3600, name_server='8.8.8.8'):
         self.receive_socket = receive_socket
@@ -66,13 +77,29 @@ class DHCPServer():
     def process_packet(self, interface_info, pool, req):
         '''Process a DHCP packet'''
 
-        # Allocate new address
-        ip = pool.allocate(req[BOOTP].chaddr)
-        print('ALLOCATING NEW ADDRESS: ', ip)
+        options = options2dict(req)
+        print('MESSAGE TYPE', options)
+        msgtype = options['message-type']
+        if msgtype == 1: # discover
+            # Reserve a new address
+            ip = pool.allocate(req[BOOTP].chaddr)
+        elif msgtype == 3: # request
+            # Allocate new address
+            reqip = None
+            if 'requested_addr' in options:
+                reqip = options['requested_addr']
+            ip = pool.allocate(req[BOOTP].chaddr, reqip)
+            print('ALLOCATING NEW ADDRESS: ', ip)
+        elif msgtype in (4, 7):  # decline, release
+            pool.release(req[BOOTP].chaddr)
+            return None
+        else:
+            print('Unknown message type')
+            return None
 
         mac = req[Ether].src
         dhcp_server_ip = interface_info.ip4.ip
-        print('SERVER IP', dhcp_server_ip)
+        print('SERVER IP', dhcp_server_ip, self.name_server, pool.subnet_mask(), pool.broadcast_address())
 
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
@@ -93,7 +120,7 @@ class DHCPServer():
             x for x in [
                 ("server_id", dhcp_server_ip),
                 ("router", dhcp_server_ip),
-                ("name_server", self.name_server),
+                ("name_server", self.name_server[0]),
                 ("broadcast_address", pool.broadcast_address()),
                 ("subnet_mask", pool.subnet_mask()),
                 ("renewal_time", self.renewal_time),
@@ -110,7 +137,6 @@ class DHCPServer():
         '''Listen for DHCP requests'''
 
         reader = await asyncio_dgram.bind(self.receive_socket)
-        # reader = asyncio_dgram.from_socket(receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
 
         while True:
@@ -142,6 +168,8 @@ class DHCPServer():
 
             reply = self.process_packet(interface_info, pool, packet)
             print('SENDING REPLY')
+            if not reply:
+                continue
             reply = VPPPunt(iface_index=sw_if_index, action=Actions.PUNT_L2) / reply
             reply.show2()
 
