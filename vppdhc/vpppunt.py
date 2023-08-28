@@ -43,6 +43,11 @@ class VPP():
         self.vpp = vpp
         self.api = vpp.api
 
+    def vpp_interface_name2index(self, ifname):
+        interface_details = self.vpp.api.sw_interface_dump(name_filter_valid=1, name_filter=ifname)
+        assert len(interface_details) == 1
+        return interface_details[0].sw_if_index
+
     def vpp_interface_info(self, ifindex):
         # Define a named tuple
         Interface = namedtuple('Interface', ['name', 'mac', 'ip4', 'ip6'])

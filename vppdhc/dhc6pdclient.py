@@ -4,7 +4,7 @@ import asyncio
 import random
 from typing import Any
 from scapy.layers.l2 import Ether
-from scapy.layers.dhcp6 import DUID_LL, DHCP6, DHCP6OptClientId, DHCP6OptIA_PD
+from scapy.layers.dhcp6 import DUID_LL, DHCP6OptClientId, DHCP6OptIA_PD
 from scapy.layers.dhcp6 import DHCP6_Solicit, DHCP6_Advertise, DHCP6_Request
 from scapy.layers.dhcp6 import DHCP6_Reply, DHCP6OptServerId, DHCP6_Renew, DHCP6OptIAPrefix
 from scapy.layers.inet6 import IPv6, UDP
@@ -22,12 +22,13 @@ class StateMachine(IntEnum):
     RELEASING = 5
 
 class DHCPv6PDClient():
-    def __init__(self, receive_socket, send_socket, vpp, if_index, internal_prefix):
+    def __init__(self, receive_socket, send_socket, vpp, if_name, internal_prefix):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
 
-        self.if_index = if_index
+        self.if_index = self.vpp.vpp_interface_name2index(if_name)
+        print('LOOKING UP INTERFACE INDEX FOR:', if_name, self.if_index)
         self.internal_prefix = internal_prefix
 
         self.bindings = {}
