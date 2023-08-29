@@ -49,11 +49,11 @@ class DHCPBinding():
         '''Reserve an IP address'''
         self.pool[ip] = 'reserved'
 
-    def allocate(self, chaddr, reqip=None) -> (IPv4Address, bool):
+    def allocate(self, chaddr, reqip=None) -> IPv4Address:
         if chaddr in self.bindings:
             # Client already has an address
             # TODO: Return binding or raise exception?
-            return self.bindings[chaddr]['ip'], False
+            return self.bindings[chaddr]['ip']
 
         # if self.prefix.num_addresses == len(self.ip2binding):
         #     raise Exception("No more IP addresses available")
@@ -79,7 +79,7 @@ class DHCPBinding():
         self.bindings[chaddr] = binding
         self.pool[ip] = self.bindings[chaddr]
 
-        return ip, True
+        return ip
 
 
     def release(self, chaddr):
@@ -132,15 +132,12 @@ class DHCPServer():
 
     def allocate_with_probe(self, chaddr, pool, ifindex, reqip=None):
         while True:
-            ip, must_probe = pool.allocate(chaddr)
-            if must_probe:
-                print(f'Probing address: {ip}')
-                if self.vpp.vpp_probe(ifindex, ip) == False:
-                    break
-                print(f'***Already in use: {ip}***')
-                pool.declined(chaddr, ip)
-            else:
+            ip = pool.allocate(chaddr)
+            print(f'Probing address: {ip}')
+            if self.vpp.vpp_probe(ifindex, ip) == False:
                 break
+            print(f'***Already in use: {ip}***')
+            pool.declined(chaddr, ip)
         return ip
 
     def process_packet(self, interface_info, pool, req):
@@ -161,7 +158,7 @@ class DHCPServer():
 
         elif msgtype == 3: # request
             # Allocate new address
-            ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex, reqip)
+            ip = pool.allocate(chaddr, reqip)
             print(f'REQUEST/RENEW: {chaddrstr}: {ip}')
         elif msgtype == 4: # decline
             # Address declined, like duplicate
