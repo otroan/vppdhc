@@ -27,6 +27,9 @@ bind_layers(VPPPunt, Ether)
 
 ##### VPP PUNT Protocol #####
 
+def vpp_callback(msg):
+    '''VPP callback function'''
+    print(f"Received VPP message: {msg}")
 
 class VPP():
 
@@ -50,7 +53,7 @@ class VPP():
 
     def vpp_interface_info(self, ifindex):
         # Define a named tuple
-        Interface = namedtuple('Interface', ['name', 'mac', 'ip4', 'ip6'])
+        Interface = namedtuple('Interface', ['ifindex', 'name', 'mac', 'ip4', 'ip6'])
 
         interface_details = self.vpp.api.sw_interface_dump(sw_if_index=ifindex)
         address_details = self.vpp.api.ip_address_dump(sw_if_index=ifindex)
@@ -58,8 +61,21 @@ class VPP():
         link_local = self.vpp.api.sw_interface_ip6_get_link_local_address(sw_if_index=ifindex)
 
         # TOOD: Cache this
-        return Interface(interface_details[0].interface_name,
+        return Interface(ifindex,
+                         interface_details[0].interface_name,
                          interface_details[0].l2_address,
                          address_details[0].prefix,
                          link_local.ip)
 
+    def vpp_probe(self, ifindex, neighbor):
+        # Watch changes for this neighbor
+        # rv = self.vpp.api.want_ip_neighbor_events_v2(enable=True, ip=neighbor, sw_if_index=ifindex)
+        # print('RV', rv)
+        # rv = self.vpp.api.ip_neighbor_probe(sw_if_index=ifindex, ip=neighbor)
+        # print('RV: ', rv)
+
+        rv = self.vpp.api.arping(address=neighbor, sw_if_index=ifindex, is_garp=False)
+        print('RV: ', rv)
+        if rv.reply_count > 0:
+            return True
+        return False
