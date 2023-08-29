@@ -45,6 +45,10 @@ class DHCPBinding():
         for ip in self.prefix.hosts():
             self.bindings[ip] = None
 
+    def reserve_ip(self, ip):
+        '''Reserve an IP address'''
+        self.pool[ip] = 'reserved'
+
     def allocate(self, chaddr, reqip=None) -> (IPv4Address, bool):
         if chaddr in self.bindings:
             # Client already has an address
@@ -238,6 +242,7 @@ class DHCPServer():
             except KeyError:
                 # Create a pool
                 pool = self.bindings[ifindex] = DHCPBinding(interface_info.ip4.network)
+                pool.reserve_ip(interface_info.ip4.ip)
 
             reply = self.process_packet(interface_info, pool, packet)
             if not reply:
