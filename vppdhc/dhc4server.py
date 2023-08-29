@@ -6,6 +6,7 @@ from typing import Any
 from scapy.layers.l2 import Ether
 from scapy.layers.dhcp import DHCP, BOOTP, DHCPOptionsField, DHCPTypes
 from scapy.layers.inet import IP, UDP
+from scapy.utils import str2mac
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
 from ipaddress import IPv4Address, IPv4Network
@@ -15,6 +16,20 @@ from ipaddress import IPv4Address, IPv4Network
 #     def __init__(self):
 #         chaddr = '00:00:00:00:00:00'
 
+class InterfaceInfo():
+    '''Interface information'''
+    def __init__(self, vpp):
+        self.vpp = vpp
+        self.interfaceinfo_cache = {}
+
+
+    def __getitem__(self, ifindex):
+        if ifindex not in self.interfaceinfo_cache:
+            info = self.vpp.vpp_interface_info(ifindex)
+            self.interfaceinfo_cache[ifindex] = info
+            print(f'Looking up interface info {info}')
+            return info
+        return self.interfaceinfo_cache[ifindex]
 
 class DHCPBinding():
     '''DHCP Binding database'''
@@ -36,8 +51,6 @@ class DHCPBinding():
             # TODO: Return binding or raise exception?
             return self.bindings[chaddr]['ip'], False
 
-        print(f'Addresses total: {self.prefix.num_addresses}')
-        print(f'Addresses in use: {len(self.pool)}')
         # if self.prefix.num_addresses == len(self.ip2binding):
         #     raise Exception("No more IP addresses available")
 
@@ -62,27 +75,7 @@ class DHCPBinding():
         self.bindings[chaddr] = binding
         self.pool[ip] = self.bindings[chaddr]
 
-        print('Allocated', ip)
-
         return ip, True
-
-    # def allocate(self, chaddr, reqip=None):
-    #     ''' find next free ip address'''
-    #     # Iterate over ip address in IPv4Prefix
-    #     if chaddr in self.bindings:
-    #         return self.bindings[chaddr]
-    #     if reqip in self.pool and self.pool[reqip] == chaddr:
-    #         self.bindings[chaddr] = reqip
-    #         return reqip
-
-    #     for ip in self.prefix.network.hosts():
-    #         # Check if ip is in bindings
-    #         if ip not in self.pool:
-    #             self.bindings[chaddr] = ip
-    #             self.pool[ip] = chaddr
-    #             return ip
-    #     #
-    #     raise Exception("No more IP addresses available")
 
 
     def release(self, chaddr):
@@ -107,7 +100,6 @@ class DHCPBinding():
         '''Return subnet mask'''
         return self.prefix.netmask
 
-
 def options2dict(packet):
     '''Get DHCP message type'''
     # Return all options in a dictionary
@@ -116,6 +108,11 @@ def options2dict(packet):
     for op in packet[DHCP].options:
         options[op[0]] = op[1]
     return options
+
+def chaddr2str(v):
+    if v[6:] == b"\x00" * 10:  # Default padding
+        return "%s (+ 10 nul pad)" % str2mac(v[:6])
+    return "%s (pad: %s)" % (str2mac(v[:6]), v[6:])
 
 class DHCPServer():
     def __init__(self, receive_socket, send_socket, vpp, renewal_time=600, lease_time=3600, name_server='8.8.8.8'):
@@ -133,9 +130,10 @@ class DHCPServer():
         while True:
             ip, must_probe = pool.allocate(chaddr)
             if must_probe:
-                print('Probing address:')
+                print(f'Probing address: {ip}')
                 if self.vpp.vpp_probe(ifindex, ip) == False:
                     break
+                print(f'***Already in use: {ip}***')
                 pool.declined(chaddr, ip)
             else:
                 break
@@ -149,29 +147,33 @@ class DHCPServer():
         if 'requested_addr' in options:
             reqip = options['requested_addr']
 
-        print('MESSAGE TYPE', options)
         msgtype = options['message-type']
+        chaddr = req[BOOTP].chaddr
+        chaddrstr = chaddr2str(chaddr)
         if msgtype == 1: # discover
             # Reserve a new address
-            ip = self.allocate_with_probe(req[BOOTP].chaddr, pool, interface_info.ifindex)
+            ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex)
+            print(f'DISCOVER: {chaddrstr}: {ip}')
+
         elif msgtype == 3: # request
             # Allocate new address
-            ip = self.allocate_with_probe(req[BOOTP].chaddr, pool, interface_info.ifindex, reqip)
-            print('ALLOCATING NEW ADDRESS: ', ip)
+            ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex, reqip)
+            print(f'REQUEST/RENEW: {chaddrstr}: {ip}')
         elif msgtype == 4: # decline
             # Address declined, like duplicate
-            pool.declined(req[BOOTP].chaddr, reqip)
+            pool.declined(chaddr, reqip)
+            print(f'DECLINE: {chaddrstr}: {reqip}')
             return None
         elif msgtype == 7:  # release
-            pool.release(req[BOOTP].chaddr)
+            pool.release(chaddr)
+            print(f'RELEASE: {chaddrstr}: {reqip}')
             return None
         else:
-            print('Unknown message type')
+            print('*** ERROR Unknown message type')
             return None
 
         mac = req[Ether].src
         dhcp_server_ip = interface_info.ip4.ip
-        print('SERVER IP', dhcp_server_ip, self.name_server, pool.subnet_mask(), pool.broadcast_address())
 
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
@@ -179,7 +181,7 @@ class DHCPServer():
         repb.siaddr = 0                 # Next server
         repb.ciaddr = 0                 # Client address
         repb.giaddr = req[BOOTP].giaddr # Relay agent IP
-        repb.chaddr = req[BOOTP].chaddr # Client hardware address
+        repb.chaddr = chaddr # Client hardware address
         del repb.payload
         resp = Ether(src=interface_info.mac, dst=mac) / IP(src=dhcp_server_ip, dst=ip) / UDP(sport=req.dport, dport=req.sport) / repb  # noqa: E501
 
@@ -210,6 +212,7 @@ class DHCPServer():
 
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
+        interfaces = InterfaceInfo(self.vpp)
 
         while True:
             # Receive on uds socket
@@ -225,24 +228,21 @@ class DHCPServer():
             if reqb.op != 1:
                 continue
 
-            sw_if_index = packet[VPPPunt].iface_index
-            print(f"Interface index: {sw_if_index}")
-            interface_info = self.vpp.vpp_interface_info(sw_if_index)
-            print(f"Interface info: {interface_info}")
+            ifindex = packet[VPPPunt].iface_index
+            interface_info = interfaces[ifindex]
 
             # Check if pool for the IP prefix on the interface exists
             # If not create one
             try:
-                pool = self.bindings[sw_if_index]
+                pool = self.bindings[ifindex]
             except KeyError:
                 # Create a pool
-                pool = self.bindings[sw_if_index] = DHCPBinding(interface_info.ip4.network)
+                pool = self.bindings[ifindex] = DHCPBinding(interface_info.ip4.network)
 
             reply = self.process_packet(interface_info, pool, packet)
-            print('SENDING REPLY')
             if not reply:
                 continue
-            reply = VPPPunt(iface_index=sw_if_index, action=Actions.PUNT_L2) / reply
+            reply = VPPPunt(iface_index=ifindex, action=Actions.PUNT_L2) / reply
             # reply.show2()
 
             await writer.send(bytes(reply))

@@ -39,7 +39,7 @@ class VPP():
         vpp = VPPApiClient()
         vpp.register_event_callback(vpp_callback)
 
-        print('Trying to connect to VPP')
+        print('Connecting to VPP')
         rv = vpp.connect("vpp")
         assert rv == 0
         print(f"Connected to VPP")
@@ -68,12 +68,6 @@ class VPP():
                          link_local.ip)
 
     def vpp_probe(self, ifindex, neighbor):
-        # Watch changes for this neighbor
-        # rv = self.vpp.api.want_ip_neighbor_events_v2(enable=True, ip=neighbor, sw_if_index=ifindex)
-        # print('RV', rv)
-        # rv = self.vpp.api.ip_neighbor_probe(sw_if_index=ifindex, ip=neighbor)
-        # print('RV: ', rv)
-
         rv = self.vpp.api.arping(address=neighbor, sw_if_index=ifindex, is_garp=False)
         print('RV: ', rv)
         if rv.reply_count > 0:
