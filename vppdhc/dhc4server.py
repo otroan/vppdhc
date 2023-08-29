@@ -87,9 +87,12 @@ class DHCPBinding():
 
     def release(self, chaddr):
         '''Release an IP address'''
-        ip = self.bindings[chaddr]
-        del self.bindings[chaddr]
-        del self.pool[ip]
+        try:
+            ip = self.bindings[chaddr]
+            del self.bindings[chaddr]
+            del self.pool[ip]
+        except KeyError:
+            pass
 
     def declined(self, chaddr, ip):
         '''Mark an IP address as declined'''
