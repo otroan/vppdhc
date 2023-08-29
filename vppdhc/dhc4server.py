@@ -126,7 +126,7 @@ class DHCPServer():
 
         self.bindings = {}
 
-    def allocate_with_probe(self, chaddr, pool, ifindex, reqip):
+    def allocate_with_probe(self, chaddr, pool, ifindex, reqip=None):
         while True:
             ip, must_probe = pool.allocate(chaddr)
             if must_probe:
