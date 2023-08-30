@@ -85,9 +85,9 @@ class DHCPBinding():
     def release(self, chaddr):
         '''Release an IP address'''
         try:
-            ip = self.bindings[chaddr]
+            binding = self.bindings[chaddr]
             del self.bindings[chaddr]
-            del self.pool[ip]
+            del self.pool[binding['ip']]
         except KeyError:
             pass
 
