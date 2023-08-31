@@ -266,7 +266,7 @@ class DHCPServer():
             # reply.show2()
 
             await writer.send(bytes(reply))
-            pool.dump()
+            # pool.dump()
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return asyncio.create_task(self.listen())

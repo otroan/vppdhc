@@ -2,16 +2,18 @@
 
 import os
 import sys
+import logging
 import json
 import asyncio
 import typer
 from vppdhc.dhc4server import DHCPServer
 from vppdhc.dhc6pdclient import DHCPv6PDClient
 from vppdhc.vpppunt import VPP
+from vppdhc._version import __version__
 
 app = typer.Typer()
+logger = logging.getLogger(__name__)
 
-from vppdhc._version import __version__
 def version_callback(value: bool):
     if value:
         typer.echo(f"vppdhcpd version: {__version__}")
@@ -39,30 +41,19 @@ async def setup_tasks(conf, vpp):
         tasks.append(pd_client())
     await asyncio.gather(*tasks)
 
-
-# from multiprocessing.managers import BaseManager
-# import queue
-# def ctl():
-#     vppdhctl_queue = queue.Queue()
-#     BaseManager.register('vppdhctl_queue', callable=lambda: vppdhctl_queue)
-#     m = BaseManager(address=('', 50000), authkey=b'qwerty')
-#     m.start()
-
-#     shared_queue = m.vppdhctl_queue()
-
-#     msg = shared_queue.get()
-#     shared_queue.put(f"Command received {}")
-
-#     m.shutdown()
-
 @app.command()
 def main(config: typer.FileText,
-         verbose: bool = False,
+         log: str = False,
          version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True),
          ):
-
+    numeric_level = logging.INFO
+    if log:
+        numeric_level = getattr(logging, log.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f'Invalid log level: {log}')
+    logging.basicConfig(filename='/var/log/vppdhc.log', encoding='utf-8', level=numeric_level)
     conf = json.loads(config.read())
-    print('CONF', conf)
+    logger.debug('Configuration %s', conf)
 
     vpp = VPP(None)
 

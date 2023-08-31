@@ -71,6 +71,6 @@ class VPP():
         '''Returns true if this is a likely duplciate'''
         rv = self.vpp.api.arping_acd(address=neighbor, sw_if_index=ifindex, is_garp=False)
         print('RV: ', rv)
-        if rv.reply_count > 0 and rv.reply.mac != mac:
+        if rv.reply_count > 0 and rv.mac_address != mac:
             return True
         return False

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 import asyncio
 import random
 from typing import Any
@@ -13,6 +14,8 @@ import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
 from enum import IntEnum
 
+logger = logging.getLogger(__name__)
+# logger = logging.getLogger("scapy")
 class StateMachine(IntEnum):
     '''DHCPv6 PD Client states'''
     INIT = 0
@@ -29,7 +32,7 @@ class DHCPv6PDClient():
         self.vpp = vpp
 
         self.if_index = self.vpp.vpp_interface_name2index(if_name)
-        print('LOOKING UP INTERFACE INDEX FOR:', if_name, self.if_index)
+        logger.debug(f'Getting interface index for: {if_name} {self.if_index}')
         self.internal_prefix = internal_prefix
 
         self.bindings = {}
@@ -41,19 +44,19 @@ class DHCPv6PDClient():
         # Install blackhole route for the delegated prefix
         iapd = reply[DHCP6OptIA_PD]
         if iapd.haslayer(DHCP6OptStatusCode):
-            print('DHCPv6 error: ', iapd.getlayer(DHCP6OptStatusCode))
+            logger.error('DHCPv6 error: ', iapd.getlayer(DHCP6OptStatusCode))
             raise Exception('DHCPv6 error')
         iapdopt = iapd[DHCP6OptIAPrefix]
-        iapdopt.show2()
+        # iapdopt.show2()
         rv = self.vpp.api.npt66_binding_add_del(is_add=True, sw_if_index=self.if_index,
                                                 internal=self.internal_prefix,
                                                 external=f'{iapdopt.prefix}/{iapdopt.plen}')
-        print('RV: ', rv)
+        logger.info(f"Setting up new NAT binding {iapdopt.prefix}/{iapdopt.plen}  ->  {self.internal_prefix} {rv}")
 
         # Install default route
         nexthop = reply[IPv6].src
         rv = self.vpp.api.cli_inband(cmd=f'ip route add ::/0 via {nexthop}')
-        print('RV', rv)
+        logger.debug(f'Adding route {rv}')
 
         # print('PREFIX: ', iapdopt.prefix, iapdopt.plen)
         # paths = [{'sw_if_index': self.if_index, 'table_id': 0}]
@@ -71,7 +74,7 @@ class DHCPv6PDClient():
         '''DHCPv6 PD Client'''
 
         interface_info = self.vpp.vpp_interface_info(self.if_index)
-        print(f"Interface info: {interface_info}")
+        logger.debug(f"Interface info: {interface_info}")
 
         # Create a DUID-LL with the MAC address
         duid = DUID_LL(lladdr=interface_info.mac)
@@ -84,7 +87,6 @@ class DHCPv6PDClient():
         rt = 1 # SOL_TIMEOUT
         rc = 0
         while True:
-            print('TIMEOUT: ', rt)
             if state == StateMachine.INIT:
 
                 # Send DHCPv6 PD solicit scapy
@@ -93,8 +95,8 @@ class DHCPv6PDClient():
                         DHCP6_Solicit() / DHCP6OptClientId(duid=duid) / DHCP6OptIA_PD())
 
                 solicit = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / solicit
-                solicit.show2()
 
+                logger.debug(f'Sending SOLICIT: {solicit.show2(dump=True)}')
                 await writer.send(bytes(solicit))
 
                 rt = 2*rt + random.uniform(-0.1, 0.1)*rt
@@ -107,22 +109,23 @@ class DHCPv6PDClient():
                         IPv6(src=interface_info.ip6, dst='ff02::1:2') / UDP(sport=546, dport=547) /
                         DHCP6_Request() / DHCP6OptClientId(duid=duid) / serverid / iapd)
                 request = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / request
-                request.show2()
                 rc += 1
+
+                logger.debug(f'Sending REQUEST {request.show2(dump=True)}')
                 await writer.send(bytes(request))
 
                 rt = 2*rt + random.uniform(-0.1, 0.1)*rt
                 rt = min(rt, 30) # REQ_MAX_RT
                 if rc > 10:
                     state = StateMachine.INIT
-                    print('REQUEST timeout')
+                    logger.warning('REQUEST timeout')
             elif state == StateMachine.RENEWING:
                 # Renew lease
                 renew = (Ether(src=interface_info.mac, dst=reply[Ether].src) /
                         IPv6(src=interface_info.ip6, dst='ff02::1:2') / UDP(sport=546, dport=547) /
                         DHCP6_Renew() / DHCP6OptClientId(duid=duid) / DHCP6OptServerId(duid=serverid) / iapd)
                 renew = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / renew
-                renew.show2()
+                # renew.show2()
                 rc += 1
                 await writer.send(bytes(renew))
 
@@ -130,7 +133,7 @@ class DHCPv6PDClient():
                 rt = min(rt, 30) # REQ_MAX_RT
                 if rc > 10:
                     state = StateMachine.INIT
-                    print('REQUEST timeout')
+                    logger.warning('REQUEST timeout')
 
             # Receive on uds socket
             try:
@@ -138,24 +141,25 @@ class DHCPv6PDClient():
             except asyncio.TimeoutError:
                 if state == StateMachine.BOUND:
                     state = StateMachine.RENEWING
-                print('Timeout')
+                logger.warning('Timeout')
                 continue
 
             # Decode packet with scapy
             reply = VPPPunt(reply)
+            logger.debug(f'Received from server {reply.show2(dump=True)}')
 
             if reply.haslayer(DHCP6_Advertise):
-                print('Received DHCPv6 Advertise')
+                logger.debug('Received DHCPv6 Advertise')
                 state = StateMachine.REQUESTING
                 rc = 0
             elif reply.haslayer(DHCP6_Reply):
-                print('Received DHCPv6 Reply')
+                logger.debug('Received DHCPv6 Reply')
                 state = StateMachine.BOUND
                 # Is it sufficient to just set rt to T1?
                 rt = reply[DHCP6OptIA_PD].T1
                 self.process_reply(reply)
 
-            reply.show2()
+            # reply.show2()
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return asyncio.create_task(self.client())
