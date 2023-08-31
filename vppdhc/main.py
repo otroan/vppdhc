@@ -39,6 +39,22 @@ async def setup_tasks(conf, vpp):
         tasks.append(pd_client())
     await asyncio.gather(*tasks)
 
+
+# from multiprocessing.managers import BaseManager
+# import queue
+# def ctl():
+#     vppdhctl_queue = queue.Queue()
+#     BaseManager.register('vppdhctl_queue', callable=lambda: vppdhctl_queue)
+#     m = BaseManager(address=('', 50000), authkey=b'qwerty')
+#     m.start()
+
+#     shared_queue = m.vppdhctl_queue()
+
+#     msg = shared_queue.get()
+#     shared_queue.put(f"Command received {}")
+
+#     m.shutdown()
+
 @app.command()
 def main(config: typer.FileText,
          verbose: bool = False,

@@ -67,9 +67,10 @@ class VPP():
                          address_details[0].prefix,
                          link_local.ip)
 
-    def vpp_probe(self, ifindex, neighbor):
-        rv = self.vpp.api.arping(address=neighbor, sw_if_index=ifindex, is_garp=False)
+    def vpp_probe_is_duplicate(self, ifindex, mac, neighbor):
+        '''Returns true if this is a likely duplciate'''
+        rv = self.vpp.api.arping_acd(address=neighbor, sw_if_index=ifindex, is_garp=False)
         print('RV: ', rv)
-        if rv.reply_count > 0:
+        if rv.reply_count > 0 and rv.reply.mac != mac:
             return True
         return False

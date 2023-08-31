@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from datetime import datetime
 import asyncio
 import hashlib
 from typing import Any
@@ -42,17 +43,17 @@ class DHCPBinding():
         # self.pool = [ip for ip in prefix.hosts()]
 
         # Create a dictionary of all available IP addresses
-        for ip in self.prefix.hosts():
-            self.bindings[ip] = None
+        # for ip in self.prefix.hosts():
+        #     self.bindings[ip] = None
 
     def reserve_ip(self, ip):
         '''Reserve an IP address'''
         self.pool[ip] = 'reserved'
 
-    def allocate(self, chaddr, reqip=None) -> IPv4Address:
+    def allocate(self, chaddr, reqip=None, meta=None) -> IPv4Address:
         if chaddr in self.bindings:
-            # Client already has an address
-            # TODO: Return binding or raise exception?
+            # Client already has an address. Renew
+            self.bindings[chaddr]['refreshed'] = datetime.now()
             return self.bindings[chaddr]['ip']
 
         # if self.prefix.num_addresses == len(self.ip2binding):
@@ -63,7 +64,7 @@ class DHCPBinding():
         else:
             # Require a new address
             # Hash the client's MAC address to generate a unique identifier
-            uid = hashlib.sha256(chaddr).digest()
+            uid = hashlib.sha256(chaddr.encode('utf-8')).digest()
             uid_int = int.from_bytes(uid[:4], byteorder='big')
             ip = IPv4Address(self.prefix.network_address + uid_int % self.prefix.num_addresses)
 
@@ -74,8 +75,8 @@ class DHCPBinding():
                 # Check if ip is in bindings
                 if ip not in self.pool:
                     break
-
-        binding = {'ip': ip, 'chaddr': chaddr, 'state': 'BOUND'}
+        # How to get a timestamp in python
+        binding = {'ip': ip, 'chaddr': chaddr, 'state': 'BOUND', 'created': datetime.now(), 'meta': meta}
         self.bindings[chaddr] = binding
         self.pool[ip] = self.bindings[chaddr]
 
@@ -104,6 +105,10 @@ class DHCPBinding():
         '''Return subnet mask'''
         return self.prefix.netmask
 
+    def dump(self):
+        for k,v in self.bindings.items():
+            print('KV', k, v)
+
 def options2dict(packet):
     '''Get DHCP message type'''
     # Return all options in a dictionary
@@ -130,11 +135,11 @@ class DHCPServer():
 
         self.bindings = {}
 
-    def allocate_with_probe(self, chaddr, pool, ifindex, reqip=None):
+    def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
         while True:
-            ip = pool.allocate(chaddr)
+            ip = pool.allocate(chaddr, meta=meta)
             print(f'Probing address: {ip}')
-            if self.vpp.vpp_probe(ifindex, ip) == False:
+            if self.vpp.vpp_probe_is_duplicate(ifindex, chaddr, ip) is False:
                 break
             print(f'***Already in use: {ip}***')
             pool.declined(chaddr, ip)
@@ -142,23 +147,36 @@ class DHCPServer():
 
     def process_packet(self, interface_info, pool, req):
         '''Process a DHCP packet'''
-
+        if req[BOOTP].giaddr != '0.0.0.0':
+            # Client must be on-link
+            print(f'**Ignoring request from non on-link client {req[Ether].src}')
+            return None
         options = options2dict(req)
+        print('OPTIONS', options)
         reqip = None
+        hostname = ''
         if 'requested_addr' in options:
             reqip = options['requested_addr']
+        if 'hostname' in options:
+            hostname = options['hostname']
+
+        metainfo = {'hostname': hostname}
 
         msgtype = options['message-type']
-        chaddr = req[BOOTP].chaddr
-        chaddrstr = chaddr2str(chaddr)
+
+        # This DHCP server is always on-link with the client, let's just use the MAC address.
+        # chaddr = req[BOOTP].chaddr
+        chaddr = req[Ether].src
+        chaddrstr = str(chaddr)
+        # chaddrstr = chaddr2str(chaddr)
         if msgtype == 1: # discover
             # Reserve a new address
-            ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex)
+            ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex, meta=metainfo)
             print(f'DISCOVER: {chaddrstr}: {ip}')
 
         elif msgtype == 3: # request
             # Allocate new address
-            ip = pool.allocate(chaddr, reqip)
+            ip = pool.allocate(chaddr, reqip, meta=metainfo)
             print(f'REQUEST/RENEW: {chaddrstr}: {ip}')
         elif msgtype == 4: # decline
             # Address declined, like duplicate
@@ -182,7 +200,7 @@ class DHCPServer():
         repb.siaddr = 0                 # Next server
         repb.ciaddr = 0                 # Client address
         repb.giaddr = req[BOOTP].giaddr # Relay agent IP
-        repb.chaddr = chaddr # Client hardware address
+        repb.chaddr = req[BOOTP].chaddr # Client hardware address
         del repb.payload
         resp = Ether(src=interface_info.mac, dst=mac) / IP(src=dhcp_server_ip, dst=ip) / UDP(sport=req.dport, dport=req.sport) / repb  # noqa: E501
 
@@ -248,6 +266,7 @@ class DHCPServer():
             # reply.show2()
 
             await writer.send(bytes(reply))
+            pool.dump()
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return asyncio.create_task(self.listen())
