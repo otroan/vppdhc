@@ -8,7 +8,9 @@ import asyncio
 import typer
 from vppdhc.dhc4server import DHCPServer
 from vppdhc.dhc6pdclient import DHCPv6PDClient
-from vppdhc.vpppunt import VPP
+from vppdhc.dhc6server import DHCPv6Server
+from vppdhc.raadv import IP6NDRA
+from vppdhc.vpppunt import VPP, VppEnum
 from vppdhc._version import __version__
 
 app = typer.Typer()
@@ -20,25 +22,64 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 async def setup_tasks(conf, vpp):
-    # DHCPv4 server
     tasks = []
+
+    # DHCPv4 client
+    if 'dhc4client' in conf:
+        c = conf['dhc4client']
+        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
+                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+                                68)
+
+        dhcp_client = DHCPClient(socket, vpp_socket, vpp,
+                                c['renewal-time'], c['lease-time'], c['name-server'])
+        tasks.append(dhcp_client())
+
+    # DHCPv4 server
     if 'dhc4server' in conf:
         c = conf['dhc4server']
-        if os.path.exists(c['socket']):
-            os.remove(c['socket'])
+        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
+                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+                                67)
 
-        dhcp_server = DHCPServer(c['socket'], conf['vpp']['socket'], vpp,
+        dhcp_server = DHCPServer(socket, vpp_socket, vpp,
                                 c['renewal-time'], c['lease-time'], c['name-server'])
         tasks.append(dhcp_server())
+
+    # DHCPv6 PD client
     if 'dhc6pdclient' in conf:
-        # DHCPv6 PD client
         c = conf['dhc6pdclient']
-        if os.path.exists(c['socket']):
-            os.remove(c['socket'])
-        pd_client = DHCPv6PDClient(c['socket'], conf['vpp']['socket'],
-                                vpp,
-                                c['interface'], c['internal-prefix'])
+        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
+                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+                                546)
+
+        npt66 = c.get('npt66', False)
+        pd_client = DHCPv6PDClient(socket, vpp_socket, vpp,
+                                c['interface'], c['internal-prefix'], npt66)
         tasks.append(pd_client())
+
+    # DHCPv6 server
+    if 'dhc6server' in conf:
+        c = conf['dhc6server']
+        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
+                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+                                547)
+        preflft = c.get('preflft', 3600)
+        validlft = c.get('validlft', 7200)
+        server = DHCPv6Server(socket, vpp_socket, vpp, c['interface'], c['prefix'], preflft, validlft)
+        tasks.append(server())
+
+    # RA advertisement
+    if 'ip6ndra' in conf:
+        c = conf['ip6ndra']
+        # Get router solicitations
+        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
+                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6,
+                                133)
+        prefix = c.get('prefix', None)
+        server = IP6NDRA(socket, vpp_socket, vpp, c['interface'], prefix)
+        tasks.append(server())
+
     await asyncio.gather(*tasks)
 
 @app.command()

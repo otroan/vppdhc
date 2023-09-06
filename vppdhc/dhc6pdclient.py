@@ -13,6 +13,7 @@ from scapy.layers.inet6 import IPv6, UDP
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
 from enum import IntEnum
+from ipaddress import IPv6Network
 
 logger = logging.getLogger(__name__)
 # logger = logging.getLogger("scapy")
@@ -26,11 +27,12 @@ class StateMachine(IntEnum):
     RELEASING = 5
 
 class DHCPv6PDClient():
-    def __init__(self, receive_socket, send_socket, vpp, if_name, internal_prefix):
+    def __init__(self, receive_socket, send_socket, vpp, if_name, internal_prefix, npt66=False):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
-
+        self.if_name = if_name
+        self.npt66 = npt66
         self.if_index = self.vpp.vpp_interface_name2index(if_name)
         logger.debug(f'Getting interface index for: {if_name} {self.if_index}')
         self.internal_prefix = internal_prefix
@@ -39,36 +41,32 @@ class DHCPv6PDClient():
 
     def process_reply(self, reply):
         '''Process a DHCPv6 reply packet'''
-        # from vpp_papi import VppEnum
-        # enum = VppEnum.vl_api_ip_neighbor_event_flags_t
-        # Install blackhole route for the delegated prefix
+
         iapd = reply[DHCP6OptIA_PD]
         if iapd.haslayer(DHCP6OptStatusCode):
             logger.error('DHCPv6 error: ', iapd.getlayer(DHCP6OptStatusCode))
             raise Exception('DHCPv6 error')
         iapdopt = iapd[DHCP6OptIAPrefix]
-        # iapdopt.show2()
-        rv = self.vpp.api.npt66_binding_add_del(is_add=True, sw_if_index=self.if_index,
-                                                internal=self.internal_prefix,
-                                                external=f'{iapdopt.prefix}/{iapdopt.plen}')
-        logger.info(f"Setting up new NAT binding {iapdopt.prefix}/{iapdopt.plen}  ->  {self.internal_prefix} {rv}")
 
-        # Install default route
+        pdprefix = IPv6Network(f'{iapdopt.prefix}/{iapdopt.plen}')
+        if self.npt66:
+            rv = self.vpp.api.npt66_binding_add_del(is_add=True, sw_if_index=self.if_index,
+                                                    internal=self.internal_prefix,
+                                                    external=pdprefix)
+            logger.info(f"Setting up new NAT binding {pdprefix}  ->  {self.internal_prefix} {rv}")
+
+        # Install default route. TODO: Might be replaced by router discovery at some point
         nexthop = reply[IPv6].src
-        rv = self.vpp.api.cli_inband(cmd=f'ip route add ::/0 via {nexthop}')
+        # rv = self.vpp.api.cli_inband(cmd=f'ip route add ::/0 via {nexthop} {self.if_name}')
+        rv = self.vpp.vpp_ip6_route_add(f'::/0', nexthop, self.if_index)
         logger.debug(f'Adding route {rv}')
 
-        # print('PREFIX: ', iapdopt.prefix, iapdopt.plen)
-        # paths = [{'sw_if_index': self.if_index, 'table_id': 0}]
-        # drop_nh = VppRoutePath("::1", 0xFFFFFFFF, type=FibPathType.FIB_PATH_TYPE_DROP)
-        # route = {'prefix': f'{iapdopt.prefix}/{iapdopt.plen}','n_paths': 1, 'paths': paths}
-        # rv = self.vpp.api.ip_route_add_del_v2(route=route)
-        # self.vpp.api.ip_add_del_route(dst_address=prefix.prefix, dst_address_length=prefix.prefixlen,
-        #                                 table_id=0, classify_table_index=0, is_ipv6=1, is_local=0,
-        #                                 is_drop=1, is_unreach=0, is_prohibit=0, is_resolve_host=0,
-        #                                 is_resolve_attached=0, is_interface_rx=0, is_classify=0,
-        #                                 is_multipath=0, is_dvr=0, is_source_lookup=0, is_rpf_id=0,
-        #                                 is_udp_encap=0, is_ip4_nh=0, is_add=1)
+        # Normally with DHCPv6 PD one would install a blackhole route for the delegated prefix.
+        # With NPT66 we don't need to do that, since the prefix is translated to the internal prefix
+        # and we have a blackhole route for the internal prefix instead.
+        if not self.npt66:
+            rv = self.vpp.vpp_ip6_route_add(pdprefix, '::', 'null')
+
 
     async def client(self):
         '''DHCPv6 PD Client'''

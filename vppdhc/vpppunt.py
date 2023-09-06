@@ -3,8 +3,9 @@ from enum import IntEnum
 from scapy.packet import Packet, bind_layers
 from scapy.fields import IntEnumField, LEIntField
 from scapy.layers.l2 import Ether
-from vpp_papi import VPPApiClient
+from vpp_papi import VPPApiClient, VppEnum
 from collections import namedtuple
+from ipaddress import ip_address
 
 # Define the action enumeration
 class Actions(IntEnum):
@@ -74,3 +75,27 @@ class VPP():
         if rv.reply_count > 0 and rv.mac_address != mac:
             return True
         return False
+
+    def vpp_socket_register(self, af, proto, port):
+        punt = {"type": VppEnum.vl_api_punt_type_t.PUNT_API_TYPE_L4,
+                   "punt": {
+                       "l4": {
+                           "af": af, "protocol": proto,
+                           "port": port
+                           }
+                    }
+                }
+        pathname = f'/tmp/vpp-punt-{af}-{proto}-{port}'
+        rv = self.vpp.api.punt_socket_register(punt=punt, header_version=1, pathname=pathname)
+        print('Punt socket register: ', rv)
+        return pathname, rv.pathname
+
+    def vpp_ip6_mreceive(self, group_prefix):
+        rv = self.vpp.api.ip6_mreceive_add_del(group_address=group_prefix)
+        print('RV', rv)
+
+    def vpp_ip6_route_add(self, prefix, nexthop, ifindex):
+        rv = self.vpp.api.ip_route_simple_add_del(prefix=prefix,
+                                                  next_hop_address=nexthop,
+                                                  next_hop_sw_if_index=ifindex)
+        print('RV', rv)
