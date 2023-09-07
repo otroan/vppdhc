@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import time
 import logging
 import asyncio
 import random
@@ -74,7 +75,10 @@ class IP6NDRA():
             # Receive on uds socket
             waited = rt
             try:
-                solicit, waited = await asyncio.wait_for(reader.recv(), timeout=rt)
+                now = time.time()
+                solicit, _ = await asyncio.wait_for(reader.recv(), timeout=rt)
+                logger.debug(f'WAITED in receive {time.time() - now}')
+                waited = time.time() - now
             except asyncio.TimeoutError:
                 logger.info(f'Timeout {waited}')
                 solicited = False
