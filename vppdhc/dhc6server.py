@@ -9,30 +9,45 @@ from scapy.layers.l2 import Ether
 from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, DHCP6_Decline, DHCP6_Rebind,
                                 DHCP6_Request, DHCP6_Advertise, DHCP6_Confirm,
                                 DHCP6_Reply, DHCP6_Renew, DHCP6OptClientId, DHCP6OptServerId,
-                                DHCP6OptIA_NA, DHCP6OptIAAddress, DHCP6OptStatusCode, DUID_LL)
+                                DHCP6OptIA_NA, DHCP6OptIAAddress, DHCP6OptStatusCode, DUID_LL,
+                                DHCP6OptDNSServers)
 from scapy.layers.inet6 import IPv6, UDP
 import asyncio_dgram
 from ipaddress import IPv6Address, IPv6Network
 from vppdhc.vpppunt import VPPPunt, Actions
 from enum import IntEnum
 
+# Configuration
+# If no configuration is given, the DHCPv6 server will find the prefix(es) configured
+# on the interface and serve addresses from those prefixes.
+# If one or more interfaces are configured, the DHCPv6 server will only respond
+# to requests on those interfaces.
+# TODO: Support multiple interfaces
+# TODO: Multiple prefixes per interface
+
 logger = logging.getLogger(__name__)
 
 class DHCPv6Server():
-    def __init__(self, receive_socket, send_socket, vpp, if_name, prefix, preflft, validlft):
+    def __init__(self, receive_socket, send_socket, vpp, conf):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
-        self.if_name = if_name
 
-        self.if_index = self.vpp.vpp_interface_name2index(if_name)
-        logger.debug(f'Getting interface index for: {if_name} {self.if_index}')
-        self.prefix = IPv6Network(prefix)
-        self.preflft = preflft
-        self.validlft = validlft
+        self.if_names = conf['interfaces']
+        self.if_name = self.if_names[0]
+
+        self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
+        logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
+
+        self.preflft = conf.get('preflft', 3600)
+        self.validlft = conf.get('validlft', 7200)
+        self.dns = conf.get('dns', None)
 
         self.interface_info = self.vpp.vpp_interface_info(self.if_index)
+        self.prefix = self.interface_info.ip6[0].network
+
         logger.debug(f"Interface info: {self.interface_info}")
+        logger.debug(f'Serving, prefix: {self.prefix} on interface {self.if_name}')
 
         # Create a DUID-LL with the MAC address
         self.duid = DUID_LL(lladdr=self.interface_info.mac)
@@ -40,53 +55,60 @@ class DHCPv6Server():
         # Add a route in the MFIB for the all DHCP servers and relays address
         self.vpp.vpp_ip6_mreceive('ff02::1:2/128')
 
+    def mk_address(self, clientduid):
+        '''Create an IPv6 address from the client's DUID'''
+        interface_id = hashlib.sha256(bytes(clientduid)).digest()[:8]
+        # Concatenate self.prefix and interface_id to create the IPv6 address
+        return IPv6Address(int(self.prefix.network_address) + int.from_bytes(interface_id, 'big'))
+
     def process_solicit(self, solicit):
         '''Process a DHCPv6 solicit/request packet'''
 
         # Create an interface identifier from the client's DUID
         clientid = solicit[DHCP6OptClientId]
         clientduid = clientid.duid
-        interface_id = hashlib.sha256(bytes(clientduid)).digest()[:8]
-        # interface_int = int.from_bytes(interface_id, 'big')
-        logger.debug(f'Interface ID: {interface_id.hex()}')
-        # Concatenate self.prefix and interface_id to create the IPv6 address
-        ipv6 = IPv6Address(int(self.prefix.network_address) + int.from_bytes(interface_id, 'big'))
 
+        ipv6 = self.mk_address(clientduid)
+        logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} from {solicit[IPv6].src}')
         t1 = int(0.5 * self.preflft)
         t2 = int(0.875 * self.preflft)
 
         advertise = (Ether(src=self.interface_info.mac, dst=solicit[Ether].src) /
-                    IPv6(src=self.interface_info.ip6, dst=solicit[IPv6].src) /
+                    IPv6(src=self.interface_info.ip6ll, dst=solicit[IPv6].src) /
                     UDP(sport=547, dport=546) /
                     DHCP6_Advertise(trid=solicit[DHCP6_Solicit].trid) /
                     DHCP6OptServerId(duid=self.duid) /
-                    DHCP6OptClientId(duid=clientduid) /
-                    DHCP6OptIA_NA(iaid=solicit[DHCP6OptIA_NA].iaid, T1=t1, T2=t2,
+                    DHCP6OptClientId(duid=clientduid))
+
+        if self.dns:
+            advertise /= DHCP6OptDNSServers(dnsservers=self.dns)
+
+        advertise /=  DHCP6OptIA_NA(iaid=solicit[DHCP6OptIA_NA].iaid, T1=t1, T2=t2,
                                   ianaopts = DHCP6OptIAAddress(addr=ipv6, preflft=self.preflft, validlft=self.validlft)
                     )
-        )
 
         advertise = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / advertise
-        advertise.show2()
+        # advertise.show2()
         return advertise
 
-    def process_request(self, request, trid):
+    def process_request(self, request, trid, msgtype):
         '''Process a DHCPv6 solicit/request packet'''
 
         # Create an interface identifier from the client's DUID
         clientid = request[DHCP6OptClientId]
         clientduid = clientid.duid
-        interface_id = hashlib.sha256(bytes(clientduid)).digest()[:8]
-        # interface_int = int.from_bytes(interface_id, 'big')
-        logger.debug(f'Interface ID: {interface_id.hex()}')
-        # Concatenate self.prefix and interface_id to create the IPv6 address
-        ipv6 = IPv6Address(int(self.prefix.network_address) + int.from_bytes(interface_id, 'big'))
+
+        ipv6 = self.mk_address(clientduid)
+        if msgtype == 3:
+            logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} from {request[IPv6].src}')
+        else:
+            logger.debug(f'Refreshing IPv6 address {ipv6} to client {clientduid} from {request[IPv6].src}')
 
         t1 = int(0.5 * self.preflft)
         t2 = int(0.875 * self.preflft)
 
         reply = (Ether(src=self.interface_info.mac, dst=request[Ether].src) /
-                    IPv6(src=self.interface_info.ip6, dst=request[IPv6].src) /
+                    IPv6(src=self.interface_info.ip6ll, dst=request[IPv6].src) /
                     UDP(sport=547, dport=546) /
                     DHCP6_Reply(trid=trid) /
                     DHCP6OptServerId(duid=self.duid) /
@@ -95,11 +117,18 @@ class DHCPv6Server():
                                   ianaopts = DHCP6OptIAAddress(addr=ipv6, preflft=self.preflft, validlft=self.validlft)
                     )
         )
+        if self.dns:
+            reply /= DHCP6OptDNSServers(dnsservers=self.dns)
 
         reply = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / reply
-        reply.show2()
+        # reply.show2()
         return reply
 
+    def process_release(self, release, trid):
+        logger.error('Received DHCPv6 Release %s', release.show2(dump=True))
+
+    def process_decline(self, decline, trid):
+        logger.error('Received DHCPv6 Decline %s', decline.show2(dump=True))
 
     async def listen(self):
         '''DHCPv6 Server'''
@@ -113,15 +142,19 @@ class DHCPv6Server():
 
             # Decode packet with scapy
             request = VPPPunt(request)
-            logger.debug(f'Received from client {request.show2(dump=True)}')
-            request.show2()
+            if request[VPPPunt].iface_index != self.if_index:
+                logger.error('Received packet on wrong interface %s', request.show2(dump=True))
+                continue
+
+            # logger.debug(f'Received from client {request.show2(dump=True)}')
+            # request.show2()
 
             p = request[IPv6].payload
             p = p.payload
             if not isinstance(p, DHCP6):
-                print('NO IDEA WHAT THIS IS')
+                logger.warning('Unknown packet received, not DHCPv6 %s', p.__class__.__name__)
                 continue
-
+            msgtype = p.msgtype
             trid = p.trid
 
             if request.haslayer(DHCP6_Solicit):
@@ -130,7 +163,7 @@ class DHCPv6Server():
             elif (request.haslayer(DHCP6_Request) or request.haslayer(DHCP6_Confirm) or
                 request.haslayer(DHCP6_Renew) or request.haslayer(DHCP6_Rebind)):
                 logger.debug('Received DHCPv6 Request, Renew, Rebind')
-                reply = self.process_request(request, trid)
+                reply = self.process_request(request, trid, msgtype)
             elif request.haslayer(DHCP6_Release):
                 reply = self.process_release(request, trid)
             elif request.haslayer(DHCP_Decline):

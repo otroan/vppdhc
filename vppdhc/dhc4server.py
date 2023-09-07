@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 from datetime import datetime
 import asyncio
 import hashlib
@@ -9,28 +10,12 @@ from scapy.layers.dhcp import DHCP, BOOTP, DHCPOptionsField, DHCPTypes
 from scapy.layers.inet import IP, UDP
 from scapy.utils import str2mac
 import asyncio_dgram
-from vppdhc.vpppunt import VPPPunt, Actions
 from ipaddress import IPv4Address, IPv4Network
+from vppdhc.vpppunt import VPPPunt, Actions
+
+logger = logging.getLogger(__name__)
 
 ##### DHCP Binding database #####
-# class DHCPBinding(dict):
-#     def __init__(self):
-#         chaddr = '00:00:00:00:00:00'
-
-class InterfaceInfo():
-    '''Interface information'''
-    def __init__(self, vpp):
-        self.vpp = vpp
-        self.interfaceinfo_cache = {}
-
-
-    def __getitem__(self, ifindex):
-        if ifindex not in self.interfaceinfo_cache:
-            info = self.vpp.vpp_interface_info(ifindex)
-            self.interfaceinfo_cache[ifindex] = info
-            print(f'Looking up interface info {info}')
-            return info
-        return self.interfaceinfo_cache[ifindex]
 
 class DHCPBinding():
     '''DHCP Binding database'''
@@ -80,6 +65,7 @@ class DHCPBinding():
         self.bindings[chaddr] = binding
         self.pool[ip] = self.bindings[chaddr]
 
+        logger.debug(f'Allocating IP address: {ip} to {chaddr}')
         return ip
 
 
@@ -124,24 +110,24 @@ def chaddr2str(v):
     return "%s (pad: %s)" % (str2mac(v[:6]), v[6:])
 
 class DHCPServer():
-    def __init__(self, receive_socket, send_socket, vpp, renewal_time=600, lease_time=3600, name_server='8.8.8.8'):
+    def __init__(self, receive_socket, send_socket, vpp, conf):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
 
-        self.renewal_time = renewal_time
-        self.lease_time = lease_time
-        self.name_server = name_server
+        self.renewal_time = conf.get('renewal-time', 600)
+        self.lease_time = conf.get('lease-time', 3600)
+        self.name_server = conf.get('name-server', None)
 
         self.bindings = {}
 
     def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
         while True:
             ip = pool.allocate(chaddr, meta=meta)
-            print(f'Probing address: {ip}')
+            logger.debug(f'Probing address: {ip}')
             if self.vpp.vpp_probe_is_duplicate(ifindex, chaddr, ip) is False:
                 break
-            print(f'***Already in use: {ip}***')
+            logger.warning(f'***Already in use: {ip} {chaddr}')
             pool.declined(chaddr, ip)
         return ip
 
@@ -149,10 +135,10 @@ class DHCPServer():
         '''Process a DHCP packet'''
         if req[BOOTP].giaddr != '0.0.0.0':
             # Client must be on-link
-            print(f'**Ignoring request from non on-link client {req[Ether].src}')
+            logger.error(f'**Ignoring request from non on-link client {req[Ether].src}')
             return None
         options = options2dict(req)
-        print('OPTIONS', options)
+
         reqip = None
         hostname = ''
         if 'requested_addr' in options:
@@ -172,27 +158,27 @@ class DHCPServer():
         if msgtype == 1: # discover
             # Reserve a new address
             ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex, meta=metainfo)
-            print(f'DISCOVER: {chaddrstr}: {ip}')
+            logger.debug(f'DISCOVER: {chaddrstr}: {ip}')
 
         elif msgtype == 3: # request
             # Allocate new address
             ip = pool.allocate(chaddr, reqip, meta=metainfo)
-            print(f'REQUEST/RENEW: {chaddrstr}: {ip}')
+            logger.debug(f'REQUEST/RENEW: {chaddrstr}: {ip}')
         elif msgtype == 4: # decline
             # Address declined, like duplicate
             pool.declined(chaddr, reqip)
-            print(f'DECLINE: {chaddrstr}: {reqip}')
+            logger.warning(f'DECLINE: {chaddrstr}: {reqip}')
             return None
         elif msgtype == 7:  # release
             pool.release(chaddr)
-            print(f'RELEASE: {chaddrstr}: {reqip}')
+            logger.debug(f'RELEASE: {chaddrstr}: {reqip}')
             return None
         else:
-            print('*** ERROR Unknown message type')
+            logger.error(f'*** ERROR Unknown message type {msgtype} from {chaddrstr} ***')
             return None
 
         mac = req[Ether].src
-        dhcp_server_ip = interface_info.ip4.ip
+        dhcp_server_ip = interface_info.ip4[0].ip
 
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
@@ -231,7 +217,6 @@ class DHCPServer():
 
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
-        interfaces = InterfaceInfo(self.vpp)
 
         while True:
             # Receive on uds socket
@@ -242,13 +227,14 @@ class DHCPServer():
             # packet.show2()
 
             if not packet.haslayer(BOOTP):
+                logger.error(f'Packet without bootp {packet.show2(dump=True)}')
                 continue
             reqb = packet.getlayer(BOOTP)
             if reqb.op != 1:
                 continue
 
             ifindex = packet[VPPPunt].iface_index
-            interface_info = interfaces[ifindex]
+            interface_info = self.vpp.vpp_interface_info(ifindex)
 
             # Check if pool for the IP prefix on the interface exists
             # If not create one
@@ -256,8 +242,8 @@ class DHCPServer():
                 pool = self.bindings[ifindex]
             except KeyError:
                 # Create a pool
-                pool = self.bindings[ifindex] = DHCPBinding(interface_info.ip4.network)
-                pool.reserve_ip(interface_info.ip4.ip)
+                pool = self.bindings[ifindex] = DHCPBinding(interface_info.ip4[0].network)
+                pool.reserve_ip(interface_info.ip4[0].ip) # Reserve the router address
 
             reply = self.process_packet(interface_info, pool, packet)
             if not reply:
@@ -277,12 +263,3 @@ class DHCPServer():
         while True:
             print('Timer fired')
             await asyncio.sleep(1)
-
-
-'''
-Make IP allocation more deterministic. Use a hash of the mac address
-to choose IP address
-
-Add ICMP echo probing, or ARP probing to check if IP address is in use?
-
-'''

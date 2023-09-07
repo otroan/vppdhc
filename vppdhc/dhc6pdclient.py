@@ -3,6 +3,8 @@
 import logging
 import asyncio
 import random
+from enum import IntEnum
+from ipaddress import IPv6Network
 from typing import Any
 from scapy.layers.l2 import Ether
 from scapy.layers.dhcp6 import (DUID_LL, DHCP6OptClientId, DHCP6OptIA_PD,
@@ -12,8 +14,6 @@ from scapy.layers.dhcp6 import (DUID_LL, DHCP6OptClientId, DHCP6OptIA_PD,
 from scapy.layers.inet6 import IPv6, UDP
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
-from enum import IntEnum
-from ipaddress import IPv6Network
 
 logger = logging.getLogger(__name__)
 # logger = logging.getLogger("scapy")

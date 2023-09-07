@@ -26,6 +26,7 @@ async def setup_tasks(conf, vpp):
 
     # DHCPv4 client
     if 'dhc4client' in conf:
+        logger.debug('Setting up DHCPv4 client')
         c = conf['dhc4client']
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
@@ -37,17 +38,18 @@ async def setup_tasks(conf, vpp):
 
     # DHCPv4 server
     if 'dhc4server' in conf:
+        logger.debug('Setting up DHCPv4 server')
         c = conf['dhc4server']
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 67)
 
-        dhcp_server = DHCPServer(socket, vpp_socket, vpp,
-                                c['renewal-time'], c['lease-time'], c['name-server'])
+        dhcp_server = DHCPServer(socket, vpp_socket, vpp, c)
         tasks.append(dhcp_server())
 
     # DHCPv6 PD client
     if 'dhc6pdclient' in conf:
+        logger.debug('Setting up DHCPv6 PD client')
         c = conf['dhc6pdclient']
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
@@ -60,24 +62,23 @@ async def setup_tasks(conf, vpp):
 
     # DHCPv6 server
     if 'dhc6server' in conf:
+        logger.debug('Setting up DHCPv6 server')
         c = conf['dhc6server']
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 547)
-        preflft = c.get('preflft', 3600)
-        validlft = c.get('validlft', 7200)
-        server = DHCPv6Server(socket, vpp_socket, vpp, c['interface'], c['prefix'], preflft, validlft)
+        server = DHCPv6Server(socket, vpp_socket, vpp, c)
         tasks.append(server())
 
     # RA advertisement
     if 'ip6ndra' in conf:
+        logger.debug('Setting up RA advertisement daemon')
         c = conf['ip6ndra']
         # Get router solicitations
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6,
                                 133)
-        prefix = c.get('prefix', None)
-        server = IP6NDRA(socket, vpp_socket, vpp, c['interface'], prefix)
+        server = IP6NDRA(socket, vpp_socket, vpp, c['interfaces'])
         tasks.append(server())
 
     await asyncio.gather(*tasks)
@@ -85,6 +86,7 @@ async def setup_tasks(conf, vpp):
 @app.command()
 def main(config: typer.FileText,
          log: str = False,
+         logfile: str = None,
          version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True),
          ):
     numeric_level = logging.INFO
@@ -92,13 +94,22 @@ def main(config: typer.FileText,
         numeric_level = getattr(logging, log.upper(), None)
     if not isinstance(numeric_level, int):
         raise ValueError(f'Invalid log level: {log}')
-    logging.basicConfig(filename='/var/log/vppdhc.log', encoding='utf-8', level=numeric_level)
+    if logfile:
+        logging.basicConfig(filename=logfile, encoding='utf-8',
+                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                        level=numeric_level)
+    else:
+        logging.basicConfig(stream=sys.stdout, encoding='utf-8',
+                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                        level=numeric_level)
     conf = json.loads(config.read())
     logger.debug('Configuration %s', conf)
 
     vpp = VPP(None)
 
     tasks = setup_tasks(conf, vpp)
+
+    logger.debug('Running main loop')
     asyncio.run(tasks)
 
     # # Cleanup (delete the bound socket file)
