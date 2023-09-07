@@ -55,12 +55,12 @@ class IP6NDRA():
                 dstmac = solicit[Ether].src
                 dstip = solicit[IPv6].src
                 rt -= waited
-                logging.debug(f'Sending solicited RA to {dstip} {self.if_name} from {interface_info.ip6ll}')
+                logger.debug(f'Sending solicited RA to {dstip} {self.if_name} from {interface_info.ip6ll}')
 
             else:
                 dstmac = '33:33:00:00:00:01'
                 dstip = 'ff02::1'
-                logging.debug(f'Sending periodic RA on {self.if_name} from {interface_info.ip6ll}')
+                logger.debug(f'Sending periodic RA on {self.if_name} from {interface_info.ip6ll}')
 
             ra = (Ether(src=interface_info.mac, dst=dstmac) /
                   IPv6(src=interface_info.ip6ll, dst=dstip) / ICMPv6ND_RA(M=1, O=1) /

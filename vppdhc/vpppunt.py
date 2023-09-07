@@ -10,6 +10,7 @@ from collections import namedtuple
 from ipaddress import ip_address
 
 logger = logging.getLogger(__name__)
+logging.getLogger('vpp_papi').setLevel(logging.ERROR)
 
 # Define the action enumeration
 class Actions(IntEnum):
