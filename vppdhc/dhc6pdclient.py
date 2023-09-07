@@ -89,7 +89,7 @@ class DHCPv6PDClient():
 
                 # Send DHCPv6 PD solicit scapy
                 solicit = (Ether(src=interface_info.mac, dst='33:33:00:01:00:02') /
-                        IPv6(src=interface_info.ip6, dst='ff02::1:2') / UDP(sport=546, dport=547) /
+                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') / UDP(sport=546, dport=547) /
                         DHCP6_Solicit() / DHCP6OptClientId(duid=duid) / DHCP6OptIA_PD())
 
                 solicit = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / solicit
@@ -104,7 +104,7 @@ class DHCPv6PDClient():
                 iapd = reply[DHCP6OptIA_PD]
                 serverid = reply[DHCP6OptServerId]
                 request = (Ether(src=interface_info.mac, dst=reply[Ether].src) /
-                        IPv6(src=interface_info.ip6, dst='ff02::1:2') / UDP(sport=546, dport=547) /
+                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') / UDP(sport=546, dport=547) /
                         DHCP6_Request() / DHCP6OptClientId(duid=duid) / serverid / iapd)
                 request = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / request
                 rc += 1
@@ -120,7 +120,7 @@ class DHCPv6PDClient():
             elif state == StateMachine.RENEWING:
                 # Renew lease
                 renew = (Ether(src=interface_info.mac, dst=reply[Ether].src) /
-                        IPv6(src=interface_info.ip6, dst='ff02::1:2') / UDP(sport=546, dport=547) /
+                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') / UDP(sport=546, dport=547) /
                         DHCP6_Renew() / DHCP6OptClientId(duid=duid) / DHCP6OptServerId(duid=serverid) / iapd)
                 renew = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / renew
                 # renew.show2()
