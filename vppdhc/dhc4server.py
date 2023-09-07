@@ -81,7 +81,10 @@ class DHCPBinding():
     def declined(self, chaddr, ip):
         '''Mark an IP address as declined'''
         self.pool[ip] = 'declined'
-        del self.bindings[chaddr]
+        try:
+            del self.bindings[chaddr]
+        except KeyError:
+            logger.info(f'Decline with no binding for {chaddr}')
 
     def broadcast_address(self):
         '''Return broadcast address'''
