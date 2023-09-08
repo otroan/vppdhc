@@ -43,7 +43,6 @@ class IP6NDRA():
         logger.debug(f"Interface info: {interface_info}")
 
         reader = await asyncio_dgram.bind(self.receive_socket)
-        # reader = asyncio_dgram.from_socket(receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
 
         rt = self.rt
@@ -61,7 +60,7 @@ class IP6NDRA():
             else:
                 dstmac = '33:33:00:00:00:01'
                 dstip = 'ff02::1'
-                logger.debug(f'Sending periodic RA on {self.if_name} from {interface_info.ip6ll}')
+                logger.debug(f'Sending periodic RA on {self.if_name} from {interface_info.ip6ll} {dstmac}')
 
             ra = (Ether(src=interface_info.mac, dst=dstmac) /
                   IPv6(src=interface_info.ip6ll, dst=dstip) / ICMPv6ND_RA(M=1, O=1) /
