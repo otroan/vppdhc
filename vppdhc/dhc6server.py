@@ -166,7 +166,7 @@ class DHCPv6Server():
                 reply = self.process_request(request, trid, msgtype)
             elif request.haslayer(DHCP6_Release):
                 reply = self.process_release(request, trid)
-            elif request.haslayer(DHCP_Decline):
+            elif request.haslayer(DHCP6_Decline):
                 reply = self.process_decline(request, trid)
             else:
                 logger.debug('Received DHCPv6 Unknown')
