@@ -49,6 +49,26 @@ class DHCPv6PDClient():
         iapdopt = iapd[DHCP6OptIAPrefix]
 
         pdprefix = IPv6Network(f'{iapdopt.prefix}/{iapdopt.plen}')
+
+        if self.bindings:
+            if (self.bindings['prefix'] != pdprefix or
+                reply[Ether].src != self.bindings['macsrc'] or
+                reply[IPv6].src != self.bindings['nexthop']):
+
+                # Delete old binding
+                rv = self.vpp.api.npt66_binding_add_del(is_add=False, sw_if_index=self.if_index,
+                                                        internal=self.internal_prefix,
+                                                        external=self.bindings['prefix'])
+                logger.info(f"Deleting old NAT binding {self.bindings['prefix']}  ->  {self.internal_prefix} {rv}")
+            else:
+                logger.debug(f'No change to PD prefix {pdprefix}')
+                return
+
+        nexthop = reply[IPv6].src
+        self.bindings['prefix'] = pdprefix
+        self.bindings['macsrc'] = reply[Ether].src
+        self.bindings['nexthop'] = nexthop
+
         if self.npt66:
             rv = self.vpp.api.npt66_binding_add_del(is_add=True, sw_if_index=self.if_index,
                                                     internal=self.internal_prefix,
@@ -56,7 +76,6 @@ class DHCPv6PDClient():
             logger.info(f"Setting up new NAT binding {pdprefix}  ->  {self.internal_prefix} {rv}")
 
         # Install default route. TODO: Might be replaced by router discovery at some point
-        nexthop = reply[IPv6].src
         # rv = self.vpp.api.cli_inband(cmd=f'ip route add ::/0 via {nexthop} {self.if_name}')
         rv = self.vpp.vpp_ip6_route_add(f'::/0', nexthop, self.if_index)
         logger.debug(f'Adding route {rv}')
