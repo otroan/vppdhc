@@ -31,6 +31,15 @@ class DHCPBinding():
         # for ip in self.prefix.hosts():
         #     self.bindings[ip] = None
 
+        # Reserve the first 10% of a prefix to manually configured addresses
+        reserved = int(self.prefix.num_addresses / 10)
+        i = 0
+        for ip in prefix:
+            if i >= reserved:
+                break
+            self.pool[ip] = 'reserved'
+            i += 1
+
     def reserve_ip(self, ip):
         '''Reserve an IP address'''
         self.pool[ip] = 'reserved'
