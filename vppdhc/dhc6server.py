@@ -55,9 +55,10 @@ class DHCPv6Server():
         # Add a route in the MFIB for the all DHCP servers and relays address
         self.vpp.vpp_ip6_mreceive('ff02::1:2/128')
 
-    def mk_address(self, clientduid):
-        '''Create an IPv6 address from the client's DUID'''
-        interface_id = hashlib.sha256(bytes(clientduid)).digest()[:8]
+    def mk_address(self, clientduid, iaid):
+        '''Create an IPv6 address from the client's DUID and IAID'''
+        interface_id = hashlib.sha256(bytes(clientduid) + iaid.to_bytes(4, 'big')).digest()[:8]
+
         # Concatenate self.prefix and interface_id to create the IPv6 address
         return IPv6Address(int(self.prefix.network_address) + int.from_bytes(interface_id, 'big'))
 
@@ -67,8 +68,9 @@ class DHCPv6Server():
         # Create an interface identifier from the client's DUID
         clientid = solicit[DHCP6OptClientId]
         clientduid = clientid.duid
+        iaid = solicit[DHCP6OptIA_NA].iaid
 
-        ipv6 = self.mk_address(clientduid)
+        ipv6 = self.mk_address(clientduid, iaid)
         logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} from {solicit[IPv6].src}')
         t1 = int(0.5 * self.preflft)
         t2 = int(0.875 * self.preflft)
@@ -97,8 +99,9 @@ class DHCPv6Server():
         # Create an interface identifier from the client's DUID
         clientid = request[DHCP6OptClientId]
         clientduid = clientid.duid
+        iaid = request[DHCP6OptIA_NA].iaid
 
-        ipv6 = self.mk_address(clientduid)
+        ipv6 = self.mk_address(clientduid, iaid)
         if msgtype == 3:
             logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} from {request[IPv6].src}')
         else:
