@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
 import logging
 import asyncio
@@ -27,7 +27,8 @@ class StateMachine(IntEnum):
     RELEASING = 5
 
 class DHCPv6PDClient():
-    def __init__(self, receive_socket, send_socket, vpp, if_name, internal_prefix, npt66=False):
+    def __init__(self, receive_socket, send_socket, vpp, if_name, internal_prefix,
+                 npt66=False):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
@@ -44,7 +45,7 @@ class DHCPv6PDClient():
 
         iapd = reply[DHCP6OptIA_PD]
         if iapd.haslayer(DHCP6OptStatusCode):
-            logger.error('DHCPv6 error: ', iapd.getlayer(DHCP6OptStatusCode))
+            logger.error(f'DHCPv6 error: {iapd.getlayer(DHCP6OptStatusCode)}')
             raise Exception('DHCPv6 error')
         iapdopt = iapd[DHCP6OptIAPrefix]
 
@@ -59,7 +60,8 @@ class DHCPv6PDClient():
                 rv = self.vpp.api.npt66_binding_add_del(is_add=False, sw_if_index=self.if_index,
                                                         internal=self.internal_prefix,
                                                         external=self.bindings['prefix'])
-                logger.info(f"Deleting old NAT binding {self.bindings['prefix']}  ->  {self.internal_prefix} {rv}")
+                logger.info("Deleting old NAT binding "
+                            f"{self.bindings['prefix']}  ->  {self.internal_prefix} {rv}")
             else:
                 logger.debug(f'No change to PD prefix {pdprefix}')
                 return
@@ -77,7 +79,7 @@ class DHCPv6PDClient():
 
         # Install default route. TODO: Might be replaced by router discovery at some point
         # rv = self.vpp.api.cli_inband(cmd=f'ip route add ::/0 via {nexthop} {self.if_name}')
-        rv = self.vpp.vpp_ip6_route_add(f'::/0', nexthop, self.if_index)
+        rv = self.vpp.vpp_ip6_route_add('::/0', nexthop, self.if_index)
         logger.debug(f'Adding route {rv}')
 
         # Normally with DHCPv6 PD one would install a blackhole route for the delegated prefix.
@@ -108,7 +110,8 @@ class DHCPv6PDClient():
 
                 # Send DHCPv6 PD solicit scapy
                 solicit = (Ether(src=interface_info.mac, dst='33:33:00:01:00:02') /
-                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') / UDP(sport=546, dport=547) /
+                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') /
+                        UDP(sport=546, dport=547) /
                         DHCP6_Solicit() / DHCP6OptClientId(duid=duid) / DHCP6OptIA_PD())
 
                 solicit = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / solicit
@@ -123,7 +126,8 @@ class DHCPv6PDClient():
                 iapd = reply[DHCP6OptIA_PD]
                 serverid = reply[DHCP6OptServerId]
                 request = (Ether(src=interface_info.mac, dst=reply[Ether].src) /
-                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') / UDP(sport=546, dport=547) /
+                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') /
+                        UDP(sport=546, dport=547) /
                         DHCP6_Request() / DHCP6OptClientId(duid=duid) / serverid / iapd)
                 request = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / request
                 rc += 1
@@ -139,8 +143,10 @@ class DHCPv6PDClient():
             elif state == StateMachine.RENEWING:
                 # Renew lease
                 renew = (Ether(src=interface_info.mac, dst=reply[Ether].src) /
-                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') / UDP(sport=546, dport=547) /
-                        DHCP6_Renew() / DHCP6OptClientId(duid=duid) / DHCP6OptServerId(duid=serverid) / iapd)
+                        IPv6(src=interface_info.ip6ll, dst='ff02::1:2') /
+                        UDP(sport=546, dport=547) /
+                        DHCP6_Renew() / DHCP6OptClientId(duid=duid) /
+                        DHCP6OptServerId(duid=serverid) / iapd)
                 renew = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / renew
                 # renew.show2()
                 rc += 1

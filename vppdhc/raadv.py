@@ -1,15 +1,16 @@
-#!/usr/bin/env python3
+# pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
 import time
 import logging
 import asyncio
-import random
 from typing import Any
 from enum import IntEnum
 from scapy.layers.l2 import Ether
-from scapy.layers.inet6 import IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, ICMPv6NDOptPrefixInfo
+from scapy.layers.inet6 import IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
+
+
 
 # TODO: Add support for sending on multiple interfaces
 # TODO: Support SLAAC. Pick up prefix from interface
@@ -46,16 +47,17 @@ class IP6NDRA():
         writer = await asyncio_dgram.connect(self.send_socket)
 
         rt = self.rt
-        solicited = False
+        solicit = None
         next_periodic = rt
 
         while True:
             # Send periodic or solicted RA
-            if solicited and next_periodic > 5:
+            if solicit and next_periodic > 5:
                 # If there is longer than 5 seconds until the next periodic RA send RS
-                dstmac = solicit[Ether].src
-                dstip = solicit[IPv6].src
-                logger.debug(f'Sending solicited RA to {dstip} {self.if_name} from {interface_info.ip6ll} {dstmac}')
+                dstmac = solicit[Ether].src # pylint: disable=unsubscriptable-object
+                dstip = solicit[IPv6].src # pylint: disable=unsubscriptable-object
+                logger.debug(f'Sending solicited RA to {dstip} {self.if_name} from'
+                              ' {interface_info.ip6ll} {dstmac}')
 
             else:
                 dstmac = '33:33:00:00:00:01'
@@ -80,13 +82,12 @@ class IP6NDRA():
                 next_periodic  -= (time.time() - now)
             except asyncio.TimeoutError:
                 logger.info(f'Timeout {waited}')
-                solicited = False
+                solicit = None
                 next_periodic = self.rt
                 continue
 
             # Decode packet with scapy
             solicit = VPPPunt(solicit)
-            solicited = True
 
             # logger.debug(f'Received from server {solicit.show2(dump=True)}')
             # solicit.show2()

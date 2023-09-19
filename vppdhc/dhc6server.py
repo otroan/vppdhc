@@ -1,29 +1,25 @@
-#!/usr/bin/env python3
+# pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
 import logging
 import asyncio
-import random
 import hashlib
 from typing import Any
+from ipaddress import IPv6Address
 from scapy.layers.l2 import Ether
 from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, DHCP6_Decline, DHCP6_Rebind,
                                 DHCP6_Request, DHCP6_Advertise, DHCP6_Confirm,
                                 DHCP6_Reply, DHCP6_Renew, DHCP6OptClientId, DHCP6OptServerId,
-                                DHCP6OptIA_NA, DHCP6OptIAAddress, DHCP6OptStatusCode, DUID_LL,
+                                DHCP6OptIA_NA, DHCP6OptIAAddress, DUID_LL,
                                 DHCP6OptDNSServers)
 from scapy.layers.inet6 import IPv6, UDP
 import asyncio_dgram
-from ipaddress import IPv6Address, IPv6Network
 from vppdhc.vpppunt import VPPPunt, Actions
-from enum import IntEnum
 
 # Configuration
 # If no configuration is given, the DHCPv6 server will find the prefix(es) configured
 # on the interface and serve addresses from those prefixes.
 # If one or more interfaces are configured, the DHCPv6 server will only respond
 # to requests on those interfaces.
-# TODO: Support multiple interfaces
-# TODO: Multiple prefixes per interface
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +67,8 @@ class DHCPv6Server():
         iaid = solicit[DHCP6OptIA_NA].iaid
 
         ipv6 = self.mk_address(clientduid, iaid)
-        logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} from {solicit[IPv6].src}')
+        logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} '
+                      'from {solicit[IPv6].src}')
         t1 = int(0.5 * self.preflft)
         t2 = int(0.875 * self.preflft)
 
@@ -85,8 +82,10 @@ class DHCPv6Server():
         if self.dns:
             advertise /= DHCP6OptDNSServers(dnsservers=self.dns)
 
-        advertise /=  DHCP6OptIA_NA(iaid=solicit[DHCP6OptIA_NA].iaid, T1=t1, T2=t2,
-                                  ianaopts = DHCP6OptIAAddress(addr=ipv6, preflft=self.preflft, validlft=self.validlft)
+        advertise /=  (DHCP6OptIA_NA(iaid=solicit[DHCP6OptIA_NA].iaid, T1=t1, T2=t2,
+                                  ianaopts = DHCP6OptIAAddress(addr=ipv6,
+                                                               preflft=self.preflft,
+                                                               validlft=self.validlft))
                     )
 
         advertise = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / advertise
@@ -103,9 +102,11 @@ class DHCPv6Server():
 
         ipv6 = self.mk_address(clientduid, iaid)
         if msgtype == 3:
-            logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} from {request[IPv6].src}')
+            logger.debug(f'Allocating IPv6 address {ipv6} to client '
+                          '{clientduid} from {request[IPv6].src}')
         else:
-            logger.debug(f'Refreshing IPv6 address {ipv6} to client {clientduid} from {request[IPv6].src}')
+            logger.debug(f'Refreshing IPv6 address {ipv6} to client '
+                          '{clientduid} from {request[IPv6].src}')
 
         t1 = int(0.5 * self.preflft)
         t2 = int(0.875 * self.preflft)
@@ -117,7 +118,9 @@ class DHCPv6Server():
                     DHCP6OptServerId(duid=self.duid) /
                     DHCP6OptClientId(duid=clientduid) /
                     DHCP6OptIA_NA(iaid=request[DHCP6OptIA_NA].iaid, T1=t1, T2=t2,
-                                  ianaopts = DHCP6OptIAAddress(addr=ipv6, preflft=self.preflft, validlft=self.validlft)
+                                  ianaopts = DHCP6OptIAAddress(addr=ipv6,
+                                                               preflft=self.preflft,
+                                                               validlft=self.validlft)
                     )
         )
         if self.dns:
@@ -129,9 +132,13 @@ class DHCPv6Server():
 
     def process_release(self, release, trid):
         logger.error('Received DHCPv6 Release %s', release.show2(dump=True))
+        # TODO: Not yet implemented
+        return None
 
     def process_decline(self, decline, trid):
         logger.error('Received DHCPv6 Decline %s', decline.show2(dump=True))
+        # TODO: Not yet implemented
+        return None
 
     async def listen(self):
         '''DHCPv6 Server'''

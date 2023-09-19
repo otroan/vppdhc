@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 
-import os
+'''
+The main module for the VPPDHC daemon.
+'''
+
+# pylint: disable=import-error, invalid-name, logging-fstring-interpolation
+
 import sys
 import logging
 import json
@@ -17,24 +22,26 @@ app = typer.Typer()
 logger = logging.getLogger(__name__)
 
 def version_callback(value: bool):
+    '''Print the version and exit'''
     if value:
         typer.echo(f"vppdhcpd version: {__version__}")
         raise typer.Exit()
 
 async def setup_tasks(conf, vpp):
+    '''Setup the tasks'''
     tasks = []
 
-    # DHCPv4 client
-    if 'dhc4client' in conf:
-        logger.debug('Setting up DHCPv4 client')
-        c = conf['dhc4client']
-        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
-                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
-                                68)
+    # # DHCPv4 client
+    # if 'dhc4client' in conf:
+    #     logger.debug('Setting up DHCPv4 client')
+    #     c = conf['dhc4client']
+    #     socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
+    #                             VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+    #                             68)
 
-        dhcp_client = DHCPClient(socket, vpp_socket, vpp,
-                                c['renewal-time'], c['lease-time'], c['name-server'])
-        tasks.append(dhcp_client())
+    #     dhcp_client = DHCPClient(socket, vpp_socket, vpp,
+    #                             c['renewal-time'], c['lease-time'], c['name-server'])
+    #     tasks.append(dhcp_client())
 
     # DHCPv4 server
     if 'dhc4server' in conf:
@@ -85,10 +92,12 @@ async def setup_tasks(conf, vpp):
 
 @app.command()
 def main(config: typer.FileText,
+         apidir: str,
          log: str = False,
          logfile: str = None,
-         version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True),
+         version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True), # pylint: disable=unused-argument
          ):
+    '''The main entry point for the VPPDHC daemon'''
     numeric_level = logging.INFO
     if log:
         numeric_level = getattr(logging, log.upper(), None)
@@ -105,7 +114,7 @@ def main(config: typer.FileText,
     conf = json.loads(config.read())
     logger.debug('Configuration %s', conf)
 
-    vpp = VPP(None)
+    vpp = VPP(apidir, None)
 
     tasks = setup_tasks(conf, vpp)
 

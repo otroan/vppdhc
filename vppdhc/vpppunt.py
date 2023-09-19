@@ -1,13 +1,18 @@
-##### VPP PUNT Protocol #####
+'''
+This provides a wrapper around the VPP API for punt sockets and multicast
+It implements the VPP Punt protocol.
+'''
+
+# pylint: disable=import-error, invalid-name, logging-fstring-interpolation
+
 import time
 import logging
 from enum import IntEnum
+from collections import namedtuple
 from scapy.packet import Packet, bind_layers
 from scapy.fields import IntEnumField, LEIntField
 from scapy.layers.l2 import Ether
 from vpp_papi import VPPApiClient, VppEnum
-from collections import namedtuple
-from ipaddress import ip_address
 
 logger = logging.getLogger(__name__)
 logging.getLogger('vpp_papi').setLevel(logging.ERROR)
@@ -20,7 +25,7 @@ class Actions(IntEnum):
     ROUTED_IP6 = 2
 
 # Define the custom header
-class VPPPunt(Packet):
+class VPPPunt(Packet): # pylint: disable=too-few-public-methods
     '''VPP Punt header'''
     name = "VPPPunt"
     fields_desc = [
@@ -33,17 +38,16 @@ bind_layers(VPPPunt, Ether)
 
 ##### VPP PUNT Protocol #####
 
-def vpp_callback(msg):
+def vpp_callback_default(msg):
     '''VPP callback function'''
     logger.debug(f"Received VPP message: {msg}")
 
 class VPP():
+    '''VPP API wrapper'''
 
-    def __init__(self, vpp_callback):
+    def __init__(self, apidir, vpp_callback=vpp_callback_default):
         # VPP API socket
-
-        # TODO: FIX THIS TO USE INSTALLED VPP. THIS IS A HACK
-        VPPApiClient.apidir = '/home/otroan/vpp/api'
+        VPPApiClient.apidir = apidir
         vpp = VPPApiClient()
         vpp.register_event_callback(vpp_callback)
 
@@ -62,11 +66,13 @@ class VPP():
         logger.debug(f"VPP version: {rv}")
 
     def vpp_interface_name2index(self, ifname):
+        '''Returns the interface index for the given interface name'''
         interface_details = self.vpp.api.sw_interface_dump(name_filter_valid=1, name_filter=ifname)
         assert len(interface_details) == 1
         return interface_details[0].sw_if_index
 
     def vpp_interface_info(self, ifindex):
+        '''Returns the interface info for the given interface index'''
         # Define a named tuple
         if ifindex in self.interface_info:
             return self.interface_info[ifindex]
@@ -100,6 +106,7 @@ class VPP():
         return False
 
     def vpp_socket_register(self, af, proto, port):
+        '''Registers a punt socket with VPP'''
         punt = {"type": VppEnum.vl_api_punt_type_t.PUNT_API_TYPE_L4,
                    "punt": {
                        "l4": {
@@ -115,11 +122,13 @@ class VPP():
         return pathname, rv.pathname
 
     def vpp_ip6_mreceive(self, group_prefix):
+        '''Adds an IPv6 multicast receive address'''
         rv = self.vpp.api.ip6_mreceive_add_del(group_address=group_prefix)
         assert rv.retval == 0
         logger.debug('Adding multicast receive {rv}')
 
     def vpp_ip6_route_add(self, prefix, nexthop, ifindex):
+        '''Adds an IPv6 route'''
         rv = self.vpp.api.ip_route_simple_add_del(prefix=prefix,
                                                   next_hop_address=nexthop,
                                                   next_hop_sw_if_index=ifindex)

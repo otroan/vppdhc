@@ -1,16 +1,16 @@
-#!/usr/bin/env python3
+# pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
 import logging
 from datetime import datetime
 import asyncio
 import hashlib
 from typing import Any
+from ipaddress import IPv4Address, IPv4Network
 from scapy.layers.l2 import Ether
-from scapy.layers.dhcp import DHCP, BOOTP, DHCPOptionsField, DHCPTypes
+from scapy.layers.dhcp import DHCP, BOOTP
 from scapy.layers.inet import IP, UDP
 from scapy.utils import str2mac
 import asyncio_dgram
-from ipaddress import IPv4Address, IPv4Network
 from vppdhc.vpppunt import VPPPunt, Actions
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,8 @@ class DHCPBinding():
                 if ip not in self.pool:
                     break
         # How to get a timestamp in python
-        binding = {'ip': ip, 'chaddr': chaddr, 'state': 'BOUND', 'created': datetime.now(), 'meta': meta}
+        binding = {'ip': ip, 'chaddr': chaddr, 'state': 'BOUND',
+                   'created': datetime.now(), 'meta': meta}
         self.bindings[chaddr] = binding
         self.pool[ip] = self.bindings[chaddr]
 
@@ -118,8 +119,8 @@ def options2dict(packet):
 
 def chaddr2str(v):
     if v[6:] == b"\x00" * 10:  # Default padding
-        return "%s (+ 10 nul pad)" % str2mac(v[:6])
-    return "%s (pad: %s)" % (str2mac(v[:6]), v[6:])
+        return f"{str2mac(v[:6])} (+ 10 nul pad)"
+    return f"{str2mac(v[:6])} (pad: {v[6:]})"
 
 class DHCPServer():
     def __init__(self, receive_socket, send_socket, vpp, conf):
@@ -151,12 +152,8 @@ class DHCPServer():
             return None
         options = options2dict(req)
 
-        reqip = None
-        hostname = ''
-        if 'requested_addr' in options:
-            reqip = options['requested_addr']
-        if 'hostname' in options:
-            hostname = options['hostname']
+        reqip = options.get('requested_addr', None)
+        hostname = options.get('hostname', '')
 
         metainfo = {'hostname': hostname}
 
@@ -200,7 +197,9 @@ class DHCPServer():
         repb.giaddr = req[BOOTP].giaddr # Relay agent IP
         repb.chaddr = req[BOOTP].chaddr # Client hardware address
         del repb.payload
-        resp = Ether(src=interface_info.mac, dst=mac) / IP(src=dhcp_server_ip, dst=ip) / UDP(sport=req.dport, dport=req.sport) / repb  # noqa: E501
+        resp = (Ether(src=interface_info.mac, dst=mac) /
+                IP(src=dhcp_server_ip, dst=ip) /
+                UDP(sport=req.dport, dport=req.sport) / repb)  # noqa: E501
 
         dhcp_options = [
                 (op[0], {1: 2, 3: 5}.get(op[1], op[1]))
