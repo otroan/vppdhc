@@ -47,14 +47,14 @@ class IP6NDRA():
 
         rt = self.rt
         solicited = False
-        waited = rt
+        next_periodic = rt
 
         while True:
             # Send periodic or solicted RA
-            if solicited and rt - waited > 5:
+            if solicited and next_periodic > 5:
+                # If there is longer than 5 seconds until the next periodic RA send RS
                 dstmac = solicit[Ether].src
                 dstip = solicit[IPv6].src
-                rt -= waited
                 logger.debug(f'Sending solicited RA to {dstip} {self.if_name} from {interface_info.ip6ll} {dstmac}')
 
             else:
@@ -75,14 +75,14 @@ class IP6NDRA():
             waited = rt
             try:
                 now = time.time()
-                solicit, _ = await asyncio.wait_for(reader.recv(), timeout=rt)
+                solicit, _ = await asyncio.wait_for(reader.recv(), timeout=next_periodic)
                 logger.debug(f'WAITED in receive {time.time() - now}')
-                waited = time.time() - now
+                next_periodic  -= (time.time() - now)
             except asyncio.TimeoutError:
                 logger.info(f'Timeout {waited}')
                 solicited = False
+                next_periodic = self.rt
                 continue
-            rt = self.rt
 
             # Decode packet with scapy
             solicit = VPPPunt(solicit)
