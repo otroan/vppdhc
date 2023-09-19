@@ -23,9 +23,11 @@ Or even the whole of 10/8.
 Not yet implemented.
 
 ## DHCPv6 PD client
-
+A DHCPv6 Prefix Delegation client. Currently only integration with NPTv6 is supported. Whenever a prefix
+is received via DHCPv6 PD, a NPTv6 binding is created with the configured internal prefix.
 
 ## DHCPv6 server
+A stateless DHCPv6 server. An address is created based on the client's DUID and IAID, and a single address is assigned to the client. No duplicate detection is performed.
 
 ## RA Advertisement daemon
 The RA advertisement daemon is very simple. For the interface(s) it is enabled on, it will advertise an RA
@@ -54,6 +56,6 @@ if SLAAC is desired.
         "name-server": ["8.8.8.8"],
         "renewal-time": 600,
         "lease-time": 3600
-    },
+    }
 }
 ```
