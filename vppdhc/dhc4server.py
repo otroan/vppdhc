@@ -1,5 +1,9 @@
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
+'''
+DHCPv4 server
+'''
+
 import logging
 from datetime import datetime
 import asyncio
@@ -45,6 +49,7 @@ class DHCPBinding():
         self.pool[ip] = 'reserved'
 
     def allocate(self, chaddr, reqip=None, meta=None) -> IPv4Address:
+        '''Allocate an IP address'''
         if chaddr in self.bindings:
             # Client already has an address. Renew
             self.bindings[chaddr]['refreshed'] = datetime.now()
@@ -105,6 +110,7 @@ class DHCPBinding():
         return self.prefix.netmask
 
     def dump(self):
+        '''Dump the bindings'''
         for k,v in self.bindings.items():
             print('KV', k, v)
 
@@ -118,12 +124,15 @@ def options2dict(packet):
     return options
 
 def chaddr2str(v):
+    '''Convert a chaddr to a string'''
     if v[6:] == b"\x00" * 10:  # Default padding
         return f"{str2mac(v[:6])} (+ 10 nul pad)"
     return f"{str2mac(v[:6])} (pad: {v[6:]})"
 
 class DHCPServer():
+    '''DHCPv4 Server'''
     def __init__(self, receive_socket, send_socket, vpp, conf):
+        '''DHCPv4 Server'''
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
@@ -135,6 +144,7 @@ class DHCPServer():
         self.bindings = {}
 
     def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
+        '''Allocate an IP address with a probe'''
         while True:
             ip = pool.allocate(chaddr, meta=meta)
             logger.debug(f'Probing address: {ip}')
@@ -144,7 +154,7 @@ class DHCPServer():
             pool.declined(chaddr, ip)
         return ip
 
-    def process_packet(self, interface_info, pool, req):
+    def process_packet(self, interface_info, pool, req): # pylint: disable=too-many-locals
         '''Process a DHCP packet'''
         if req[BOOTP].giaddr != '0.0.0.0':
             # Client must be on-link
@@ -267,10 +277,3 @@ class DHCPServer():
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return asyncio.create_task(self.listen())
-
-
-    async def handle_timer(self):
-        '''Handle a timer'''
-        while True:
-            print('Timer fired')
-            await asyncio.sleep(1)

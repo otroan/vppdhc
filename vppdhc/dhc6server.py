@@ -1,5 +1,9 @@
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
+'''
+Stateless DHCPv6 IA_NA Server
+'''
+
 import logging
 import asyncio
 import hashlib
@@ -10,7 +14,7 @@ from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, DHCP6_Decli
                                 DHCP6_Request, DHCP6_Advertise, DHCP6_Confirm,
                                 DHCP6_Reply, DHCP6_Renew, DHCP6OptClientId, DHCP6OptServerId,
                                 DHCP6OptIA_NA, DHCP6OptIAAddress, DUID_LL,
-                                DHCP6OptDNSServers)
+                                DHCP6OptDNSServers, DHCP6OptStatusCode)
 from scapy.layers.inet6 import IPv6, UDP
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
@@ -23,7 +27,8 @@ from vppdhc.vpppunt import VPPPunt, Actions
 
 logger = logging.getLogger(__name__)
 
-class DHCPv6Server():
+class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
+    '''DHCPv6 Server'''
     def __init__(self, receive_socket, send_socket, vpp, conf):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
@@ -131,14 +136,36 @@ class DHCPv6Server():
         return reply
 
     def process_release(self, release, trid):
+        '''Process a DHCPv6 Release packet'''
         logger.error('Received DHCPv6 Release %s', release.show2(dump=True))
-        # TODO: Not yet implemented
-        return None
+        clientid = release[DHCP6OptClientId]
+        clientduid = clientid.duid
+
+        reply = (Ether(src=self.interface_info.mac, dst=release[Ether].src) /
+            IPv6(src=self.interface_info.ip6ll, dst=release[IPv6].src) /
+            UDP(sport=547, dport=546) /
+            DHCP6_Reply(trid=trid) /
+            DHCP6OptServerId(duid=self.duid) /
+            DHCP6OptClientId(duid=clientduid) /
+            DHCP6OptStatusCode(statuscode=0, statusmsg='Success')
+            )
+        return reply
 
     def process_decline(self, decline, trid):
+        '''Process a DHCPv6 Decline packet'''
         logger.error('Received DHCPv6 Decline %s', decline.show2(dump=True))
-        # TODO: Not yet implemented
-        return None
+        clientid = decline[DHCP6OptClientId]
+        clientduid = clientid.duid
+
+        reply = (Ether(src=self.interface_info.mac, dst=decline[Ether].src) /
+            IPv6(src=self.interface_info.ip6ll, dst=decline[IPv6].src) /
+            UDP(sport=547, dport=546) /
+            DHCP6_Reply(trid=trid) /
+            DHCP6OptServerId(duid=self.duid) /
+            DHCP6OptClientId(duid=clientduid) /
+            DHCP6OptStatusCode(statuscode=0, statusmsg='Success')
+            )
+        return reply
 
     async def listen(self):
         '''DHCPv6 Server'''

@@ -1,5 +1,9 @@
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
+'''
+DHCPv6 IA_PD client
+'''
+
 import logging
 import asyncio
 import random
@@ -27,6 +31,7 @@ class StateMachine(IntEnum):
     RELEASING = 5
 
 class DHCPv6PDClient():
+    '''DHCPv6 PD Client'''
     def __init__(self, receive_socket, send_socket, vpp, if_name, internal_prefix,
                  npt66=False):
         self.receive_socket = receive_socket
