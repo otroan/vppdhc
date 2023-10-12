@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 from enum import IntEnum
 from scapy.layers.l2 import Ether
-from scapy.layers.inet6 import IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr
+from scapy.layers.inet6 import IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, ICMPv6NDOptPrefixInfo
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
 
@@ -27,13 +27,19 @@ class StateMachine(IntEnum):
     RELEASING = 5
 
 class IP6NDRA():
-    def __init__(self, receive_socket, send_socket, vpp, if_names):
+    def __init__(self, receive_socket, send_socket, vpp, configuration):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
+        if_names = configuration['interfaces']
         self.if_names = if_names
         self.if_name = if_names[0]
-        self.rt = 600
+        self.pio = configuration['pio']
+        self.pio_prefix = self.pio['prefix']
+        self.pio_prefixlen = self.pio['prefixlen']
+        self.pio_L = self.pio['L']
+        self.pio_A = self.pio['A']
+        self.rt = configuration.get('maxrtradvinterval', 600)
         self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
         logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
 
@@ -68,9 +74,13 @@ class IP6NDRA():
                   IPv6(src=interface_info.ip6ll, dst=dstip) / ICMPv6ND_RA(M=1, O=1) /
                     ICMPv6NDOptSrcLLAddr(lladdr=interface_info.mac)
                     )
-
+            if self.pio:
+                ra /= ICMPv6NDOptPrefixInfo(prefix=self.pio_prefix, prefixlen=self.pio_prefixlen,
+                                            L=self.pio_L, A=self.pio_A)
             ra = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / ra
             # ra.show2()
+            print('Sending RA')
+            ra.show2()
             await writer.send(bytes(ra))
 
             # Receive on uds socket
