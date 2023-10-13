@@ -62,17 +62,8 @@ async def setup_tasks(conf, vpp):
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 546) # pylint: disable=no-member
 
-        bfdecho = c.get('bfdecho', False)
-        if bfdecho:
-            logger.debug('Setting up BFD echo')
-            bfd_socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
-                                    VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
-                                    3784)
-        else:
-            logger.debug('Not setting up BFD echo')
-            bfd_socket = None
         npt66 = c.get('npt66', False)
-        pd_client = DHCPv6PDClient(socket, vpp_socket, bfd_socket, vpp,
+        pd_client = DHCPv6PDClient(socket, vpp_socket, vpp,
                                 c['interface'], c['internal-prefix'], npt66)
 
         tasks.append(pd_client())

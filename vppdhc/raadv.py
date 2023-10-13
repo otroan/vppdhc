@@ -34,11 +34,12 @@ class IP6NDRA():
         if_names = configuration['interfaces']
         self.if_names = if_names
         self.if_name = if_names[0]
-        self.pio = configuration['pio']
-        self.pio_prefix = self.pio['prefix']
-        self.pio_prefixlen = self.pio['prefixlen']
-        self.pio_L = self.pio['L']
-        self.pio_A = self.pio['A']
+        self.pio = configuration.get('pio', False)
+        if self.pio:
+            self.pio_prefix = self.pio['prefix']
+            self.pio_prefixlen = self.pio['prefixlen']
+            self.pio_L = self.pio['L']
+            self.pio_A = self.pio['A']
         self.rt = configuration.get('maxrtradvinterval', 600)
         self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
         logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
