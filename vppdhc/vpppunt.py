@@ -13,6 +13,7 @@ from scapy.packet import Packet, bind_layers
 from scapy.fields import IntEnumField, LEIntField
 from scapy.layers.l2 import Ether
 from vpp_papi import VPPApiClient, VppEnum
+from ipaddress import IPv6Network
 
 logger = logging.getLogger(__name__)
 logging.getLogger('vpp_papi').setLevel(logging.ERROR)
@@ -121,16 +122,97 @@ class VPP():
         logger.info(f'Punt socket register: {rv}')
         return pathname, rv.pathname
 
-    def vpp_ip6_mreceive(self, group_prefix):
-        '''Adds an IPv6 multicast receive address'''
-        rv = self.vpp.api.ip6_mreceive_add_del(group_address=group_prefix)
-        assert rv.retval == 0
-        logger.debug('Adding multicast receive {rv}')
-
-    def vpp_ip6_route_add(self, prefix, nexthop, ifindex):
+    def vpp_ip6_route_add(self, prefix, nexthop, nh_ifindex=0xFFFFFFFF, table_id=0, src=0):
         '''Adds an IPv6 route'''
-        rv = self.vpp.api.ip_route_simple_add_del(prefix=prefix,
-                                                  next_hop_address=nexthop,
-                                                  next_hop_sw_if_index=ifindex)
+
+        # Path
+        proto = 1 # IPv6
+        nh = {"address": {"ip6": nexthop}}
+        path = {
+            "weight": 1,
+            "preference": 0,
+            "table_id": 0,
+            "nh": nh,
+            "next_hop_id": 0xFFFFFFFF,
+            "sw_if_index": nh_ifindex,
+            "rpf_id": 0,
+            "proto": proto,
+            "type": 0, # FIB_PATH_TYPE_NORMAL
+            "flags": 0, # FIB_PATH_FLAG_NONE
+            "n_labels": 0,
+            "label_stack": [0]*16
+        }
+
+        rv = self.vpp.api.ip_route_add_del_v2(
+            route={
+                "table_id": table_id,
+                "prefix": prefix,
+                "n_paths": 1,
+                "paths": [path],
+                "src": src,
+            },
+            is_add=1,
+            is_multipath=0,
+        )
         assert rv.retval == 0
-        logger.debug(f'Adding route {prefix} {nexthop} {ifindex} {rv}')
+        logger.debug(f'Adding route {prefix} {nexthop} {nh_ifindex} {rv}')
+
+
+    def vpp_ip6_route_del2(self, prefix, table_id=0, src=0):
+        r = self.vpp.api.ip_route_add_del_v2(
+            route={
+                "table_id": table_id,
+                "prefix": prefix,
+                "src": src,
+                "n_paths": 0,
+            },
+            is_add=0,
+            is_multipath=0,
+        )
+
+    def vpp_ip6_mreceive(self, group_prefix, table_id=0):
+        # _paths = self.encoded_paths if paths is None else paths
+        proto = 1 # IPv6
+        nh_ifindex = 0xFFFFFFFF
+        # nh_i_flags = 0
+        e_flags = 0
+        nh = {"address": {"ip6": '::'}}
+        prefix = IPv6Network(group_prefix)
+        prefix = {
+            "af": 1, # IP6
+            "grp_address": {"ip6": prefix.network_address},
+            "src_address": {"ip6": '::'},
+            "grp_address_length": prefix.prefixlen
+        }
+
+        path = {
+            "weight": 1,
+            "preference": 0,
+            "table_id": 0,
+            "nh": nh,
+            "next_hop_id": 0xFFFFFFFF,
+            "sw_if_index": nh_ifindex,
+            "rpf_id": 0,
+            "proto": proto,
+            "type": 0, # FIB_PATH_TYPE_NORMAL
+            "flags": 0, # FIB_PATH_FLAG_NONE
+            "n_labels": 0,
+            "label_stack": [0]*16
+        }
+        mpath = {
+            "itf_flags": 4,
+            "path": path,
+        }
+        route = {
+            "table_id": table_id,
+            "entry_flags": e_flags,
+            "rpf_id": 0,
+            "prefix": prefix,
+            "n_paths": 1,
+            "paths": [mpath],
+        }
+
+        rv = self.vpp.api.ip_mroute_add_del(
+            route=route, is_multipath=0, is_add=1
+        )
+        print(f'Tried to add an mreceive entry {rv}')

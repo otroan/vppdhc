@@ -91,7 +91,7 @@ class DHCPv6PDClient():
         # With NPT66 we don't need to do that, since the prefix is translated to the internal prefix
         # and we have a blackhole route for the internal prefix instead.
         if not self.npt66:
-            rv = self.vpp.vpp_ip6_route_add(pdprefix, '::', 'null')
+            rv = self.vpp.vpp_ip6_route_add(pdprefix, '::')
 
 
     async def client(self):
