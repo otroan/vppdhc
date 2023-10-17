@@ -21,6 +21,52 @@ from vppdhc._version import __version__
 app = typer.Typer()
 logger = logging.getLogger(__name__)
 
+
+# Validate the configuration file against a Pydantic model
+from pydantic import BaseModel, Field
+from pydantic.networks import IPvAnyAddress, IPvAnyNetwork, IPv6Address, IPv6Network, IPv4Address
+
+class ConfVPP(BaseModel):
+    socket: str
+
+class ConfDHCP4Client(BaseModel):
+    pass
+
+class ConfDHCP4Server(BaseModel):
+    lease_time: int = Field(alias='lease-time')
+    renewal_time: int = Field(alias='renewal-time')
+    dns: list[IPv4Address]
+
+class ConfDHCP6PDClient(BaseModel):
+    interface: str
+    internal_prefix: IPv6Network = Field(alias='internal-prefix')
+    npt66: bool = False
+
+class ConfDHCP6Server(BaseModel):
+    interfaces: list[str]
+    preflft: int = 604800
+    validlft: int = 2592000
+    dns: list[IPv6Address]
+
+class ConfIP6NDPrefix(BaseModel):
+    prefix: IPv6Network
+    L: bool = True
+    A: bool = False
+class ConfIP6NDRA(BaseModel):
+    interfaces: list[str]
+    pio: ConfIP6NDPrefix = None
+    maxrtradvinterval: int = 600
+
+class Configuration(BaseModel):
+    '''Configuration model'''
+    vpp: ConfVPP
+    dhc4client: ConfDHCP4Client = None
+    dhc4server: ConfDHCP4Server = None
+    dhc6pdclient: ConfDHCP6PDClient = None
+    dhc6server: ConfDHCP6Server = None
+    ip6ndra: ConfIP6NDRA = None
+
+
 def version_callback(value: bool):
     '''Print the version and exit'''
     if value:
@@ -44,49 +90,42 @@ async def setup_tasks(conf, vpp):
     #     tasks.append(dhcp_client())
 
     # DHCPv4 server
-    if 'dhc4server' in conf:
+    if conf.dhc4server:
         logger.debug('Setting up DHCPv4 server')
-        c = conf['dhc4server']
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 67)
 
-        dhcp_server = DHCPServer(socket, vpp_socket, vpp, c)
+        dhcp_server = DHCPServer(socket, vpp_socket, vpp, conf.dhc4server)
         tasks.append(dhcp_server())
 
     # DHCPv6 PD client
-    if 'dhc6pdclient' in conf:
+    if conf.dhc6pdclient:
         logger.debug('Setting up DHCPv6 PD client')
-        c = conf['dhc6pdclient']
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 546) # pylint: disable=no-member
 
-        npt66 = c.get('npt66', False)
-        pd_client = DHCPv6PDClient(socket, vpp_socket, vpp,
-                                c['interface'], c['internal-prefix'], npt66)
-
+        pd_client = DHCPv6PDClient(socket, vpp_socket, vpp, conf.dhc6pdclient)
         tasks.append(pd_client())
 
     # DHCPv6 server
-    if 'dhc6server' in conf:
+    if conf.dhc6server:
         logger.debug('Setting up DHCPv6 server')
-        c = conf['dhc6server']
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 547) # pylint: disable=no-member
-        server = DHCPv6Server(socket, vpp_socket, vpp, c)
+        server = DHCPv6Server(socket, vpp_socket, vpp, conf.dhc6server)
         tasks.append(server())
 
     # RA advertisement
-    if 'ip6ndra' in conf:
+    if conf.ip6ndra:
         logger.debug('Setting up RA advertisement daemon')
-        c = conf['ip6ndra']
         # Get router solicitations
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6,
                                 133) # pylint: disable=no-member
-        server = IP6NDRA(socket, vpp_socket, vpp, c)
+        server = IP6NDRA(socket, vpp_socket, vpp, conf.ip6ndra)
         tasks.append(server())
 
     await asyncio.gather(*tasks)
@@ -113,11 +152,15 @@ def main(config: typer.FileText,
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                         level=numeric_level)
     conf = json.loads(config.read())
-    logger.debug('Configuration %s', conf)
+
+    validatedconf = Configuration(**conf)
+    print('Validated configuration: ', validatedconf)
+
+    logger.debug('Configuration %s', validatedconf)
 
     vpp = VPP(apidir, None)
 
-    tasks = setup_tasks(conf, vpp)
+    tasks = setup_tasks(validatedconf, vpp)
 
     logger.debug('Running main loop')
     asyncio.run(tasks)

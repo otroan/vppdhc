@@ -18,6 +18,10 @@ from ipaddress import IPv6Network
 logger = logging.getLogger(__name__)
 logging.getLogger('vpp_papi').setLevel(logging.ERROR)
 
+class VPPDHCException(Exception):
+    '''VPP DHC Exception'''
+    pass
+
 # Define the action enumeration
 class Actions(IntEnum):
     '''VPP Punt actions'''
@@ -69,7 +73,8 @@ class VPP():
     def vpp_interface_name2index(self, ifname):
         '''Returns the interface index for the given interface name'''
         interface_details = self.vpp.api.sw_interface_dump(name_filter_valid=1, name_filter=ifname)
-        assert len(interface_details) == 1
+        if len(interface_details) != 1:
+            raise VPPDHCException(f'Interface {ifname} not found')
         return interface_details[0].sw_if_index
 
     def vpp_interface_info(self, ifindex):

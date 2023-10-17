@@ -137,9 +137,9 @@ class DHCPServer():
         self.send_socket = send_socket
         self.vpp = vpp
 
-        self.renewal_time = conf.get('renewal-time', 600)
-        self.lease_time = conf.get('lease-time', 3600)
-        self.name_server = conf.get('name-server', None)
+        self.renewal_time = conf.renewal_time
+        self.lease_time = conf.lease_time
+        self.name_server = conf.dns
 
         self.bindings = {}
 

@@ -31,16 +31,15 @@ class IP6NDRA():
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
-        if_names = configuration['interfaces']
+        if_names = configuration.interfaces
         self.if_names = if_names
         self.if_name = if_names[0]
-        self.pio = configuration.get('pio', False)
+        self.pio = configuration.pio
         if self.pio:
-            self.pio_prefix = self.pio['prefix']
-            self.pio_prefixlen = self.pio['prefixlen']
-            self.pio_L = self.pio['L']
-            self.pio_A = self.pio['A']
-        self.rt = configuration.get('maxrtradvinterval', 600)
+            self.pio_prefix = self.pio.prefix
+            self.pio_L = self.pio.L
+            self.pio_A = self.pio.A
+        self.rt = configuration.maxrtradvinterval
         self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
         logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
 
@@ -76,7 +75,7 @@ class IP6NDRA():
                     ICMPv6NDOptSrcLLAddr(lladdr=interface_info.mac)
                     )
             if self.pio:
-                ra /= ICMPv6NDOptPrefixInfo(prefix=self.pio_prefix, prefixlen=self.pio_prefixlen,
+                ra /= ICMPv6NDOptPrefixInfo(prefix=self.pio_prefix.network_address, prefixlen=self.pio_prefix.prefixlen,
                                             L=self.pio_L, A=self.pio_A)
             ra = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / ra
             # ra.show2()

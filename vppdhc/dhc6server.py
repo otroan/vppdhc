@@ -34,17 +34,19 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
         self.send_socket = send_socket
         self.vpp = vpp
 
-        self.if_names = conf['interfaces']
+        self.if_names = conf.interfaces
         self.if_name = self.if_names[0]
 
         self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
         logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
 
-        self.preflft = conf.get('preflft', 3600)
-        self.validlft = conf.get('validlft', 7200)
-        self.dns = conf.get('dns', None)
+        self.preflft = conf.preflft
+        self.validlft = conf.validlft
+        self.dns = conf.dns
 
         self.interface_info = self.vpp.vpp_interface_info(self.if_index)
+
+        # Give out addresses from the first prefix configured on the interface
         self.prefix = self.interface_info.ip6[0].network
 
         logger.debug(f"Interface info: {self.interface_info}")

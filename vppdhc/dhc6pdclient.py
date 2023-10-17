@@ -32,16 +32,15 @@ class StateMachine(IntEnum):
 
 class DHCPv6PDClient():
     '''DHCPv6 PD Client'''
-    def __init__(self, receive_socket, send_socket, vpp, if_name, internal_prefix,
-                 npt66=False):
+    def __init__(self, receive_socket, send_socket, vpp, conf):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
-        self.if_name = if_name
-        self.npt66 = npt66
-        self.if_index = self.vpp.vpp_interface_name2index(if_name)
-        logger.debug(f'Getting interface index for: {if_name} {self.if_index}')
-        self.internal_prefix = internal_prefix
+        self.if_name = conf.interface
+        self.npt66 = conf.npt66
+        self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
+        logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
+        self.internal_prefix = conf.internal_prefix
 
         self.bindings = {}
 
@@ -191,11 +190,3 @@ class DHCPv6PDClient():
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return asyncio.create_task(self.client())
-
-
-    ## NOT USED
-    async def handle_timer(self):
-        '''Handle a timer'''
-        while True:
-            print('Timer fired')
-            await asyncio.sleep(1)
