@@ -221,3 +221,31 @@ class VPP():
             route=route, is_multipath=0, is_add=1
         )
         print(f'Tried to add an mreceive entry {rv}')
+
+    def vpp_dhcp_client_detect(self, ifindex, enable=True):
+        r = self.vpp.api.dhcp_client_detect_enable_disable(
+            sw_if_index=ifindex,
+            enable=enable,
+        )
+        assert r.retval == 0
+
+    def vpp_ip_address(self, ifindex, prefix, add=True):
+        r = self.vpp.api.sw_interface_add_del_address(
+            sw_if_index=ifindex,
+            is_add=add,
+            del_all=False,
+            prefix=prefix
+        )
+        return r
+
+    def vpp_vcdp_nat_add(self, nat_id, addresses):
+        r = self.vpp.api.vcdp_nat_add(nat_id=nat_id,
+                                      n_addr=len(addresses),
+                                      addr=addresses)
+        print('RV', r)
+
+    def vpp_vcdp_nat_bind_set_unset(self, tenant_id, nat_id, is_set=True):
+        r = self.vpp.api.vcdp_nat_bind_set_unset(tenant_id=tenant_id,
+                                                 nat_id=nat_id,
+                                                 is_set=is_set)
+        print('RV', r)

@@ -11,6 +11,7 @@ import logging
 import json
 import asyncio
 import typer
+from vppdhc.dhc4client import DHCPClient
 from vppdhc.dhc4server import DHCPServer
 from vppdhc.dhc6pdclient import DHCPv6PDClient
 from vppdhc.dhc6server import DHCPv6Server
@@ -30,7 +31,9 @@ class ConfVPP(BaseModel):
     socket: str
 
 class ConfDHCP4Client(BaseModel):
-    pass
+    interface: str
+    nat: str
+    tenant: int
 
 class ConfDHCP4Server(BaseModel):
     lease_time: int = Field(alias='lease-time')
@@ -77,17 +80,15 @@ async def setup_tasks(conf, vpp):
     '''Setup the tasks'''
     tasks = []
 
-    # # DHCPv4 client
-    # if 'dhc4client' in conf:
-    #     logger.debug('Setting up DHCPv4 client')
-    #     c = conf['dhc4client']
-    #     socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
-    #                             VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
-    #                             68)
+    # DHCPv4 client
+    if conf.dhc4client:
+        logger.debug('Setting up DHCPv4 client')
+        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
+                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+                                68)
 
-    #     dhcp_client = DHCPClient(socket, vpp_socket, vpp,
-    #                             c['renewal-time'], c['lease-time'], c['name-server'])
-    #     tasks.append(dhcp_client())
+        dhcp_client = DHCPClient(socket, vpp_socket, vpp, conf.dhc4client)
+        tasks.append(dhcp_client())
 
     # DHCPv4 server
     if conf.dhc4server:
