@@ -59,6 +59,7 @@ class ConfIP6NDRA(BaseModel):
     interfaces: list[str]
     pio: ConfIP6NDPrefix = None
     maxrtradvinterval: int = 600
+    pref64: IPv6Network = None
 
 class Configuration(BaseModel):
     '''Configuration model'''

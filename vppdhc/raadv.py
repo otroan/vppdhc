@@ -6,10 +6,12 @@ import asyncio
 from typing import Any
 from enum import IntEnum
 from scapy.layers.l2 import Ether
-from scapy.layers.inet6 import IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, ICMPv6NDOptPrefixInfo
+from scapy.layers.inet6 import (IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, ICMPv6NDOptPrefixInfo,
+                                ICMPv6NDOptPREF64)
+
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
-
+from IPython import embed
 
 
 # TODO: Add support for sending on multiple interfaces
@@ -40,6 +42,7 @@ class IP6NDRA():
             self.pio_L = self.pio.L
             self.pio_A = self.pio.A
         self.rt = configuration.maxrtradvinterval
+        self.pref64 = configuration.pref64
         self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
         logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
 
@@ -77,6 +80,8 @@ class IP6NDRA():
             if self.pio:
                 ra /= ICMPv6NDOptPrefixInfo(prefix=self.pio_prefix.network_address, prefixlen=self.pio_prefix.prefixlen,
                                             L=self.pio_L, A=self.pio_A)
+            if self.pref64:
+                ra /= ICMPv6NDOptPREF64(prefix=self.pref64.network_address, scaledlifetime=8191)
             ra = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / ra
             # ra.show2()
             print('Sending RA')

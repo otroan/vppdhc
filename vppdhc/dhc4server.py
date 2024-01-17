@@ -21,12 +21,50 @@ logger = logging.getLogger(__name__)
 
 ##### DHCP Binding database #####
 
+from ipaddress import IPv4Address
+
+class DHCPPool(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for key in list(self.keys()):
+            self._normalize_key(key)
+
+    def __setitem__(self, key, value):
+        normalized_key = self._normalize_key(key)
+        super().__setitem__(normalized_key, value)
+
+    def __getitem__(self, key):
+        normalized_key = self._normalize_key(key)
+        return super().__getitem__(normalized_key)
+
+    def __contains__(self, key):
+        normalized_key = self._normalize_key(key)
+        return super().__contains__(normalized_key)
+
+    def _normalize_key(self, key):
+        if isinstance(key, IPv4Address):
+            normalized_key = str(key)
+        elif isinstance(key, str):
+            normalized_key = key
+        else:
+            raise TypeError("Key must be a str or IPv4Address")
+        return normalized_key
+
+    def get(self, key, default=None):
+        normalized_key = self._normalize_key(key)
+        return super().get(normalized_key, default)
+
+    def pop(self, key, *args):
+        normalized_key = self._normalize_key(key)
+        return super().pop(normalized_key, *args)
+
+
 class DHCPBinding():
     '''DHCP Binding database'''
     def __init__(self, prefix: IPv4Network):
         self.prefix = prefix
         self.bindings = {}
-        self.pool = {}
+        self.pool = DHCPPool()
 
         # List of all available IP addresses
         # self.pool = [ip for ip in prefix.hosts()]
@@ -41,22 +79,24 @@ class DHCPBinding():
         for ip in prefix:
             if i >= reserved:
                 break
-            self.pool[ip] = 'reserved'
+            self.reserve_ip(ip)
             i += 1
 
     def reserve_ip(self, ip):
         '''Reserve an IP address'''
         self.pool[ip] = 'reserved'
 
-    def allocate(self, chaddr, reqip=None, meta=None) -> IPv4Address:
-        '''Allocate an IP address'''
-        if chaddr in self.bindings:
-            # Client already has an address. Renew
-            self.bindings[chaddr]['refreshed'] = datetime.now()
-            return self.bindings[chaddr]['ip']
+    def pool_add(self, ip: IPv4Address, binding: dict):
+        '''Add an IP address to the pool'''
+        self.pool[ip] = binding
 
-        # if self.prefix.num_addresses == len(self.ip2binding):
-        #     raise Exception("No more IP addresses available")
+    def in_use(self, ip):
+        return False if ip in self.pool and self.pool[ip] == 'declined' else ip in self.pool
+
+    def get_next_free(self, chaddr, reqip=None) -> IPv4Address:
+        if chaddr in self.bindings:
+            # Client already has an address. Return the same
+            return self.bindings[chaddr]['ip']
 
         if reqip:
             ip = reqip
@@ -68,12 +108,25 @@ class DHCPBinding():
             ip = IPv4Address(self.prefix.network_address + uid_int % self.prefix.num_addresses)
 
         # Check if IP address is in pool
-        if ip in self.pool:
+        if self.in_use(ip):
             # IP address is in use, pick another one
             for ip in self.prefix.hosts():
                 # Check if ip is in bindings
-                if ip not in self.pool:
+                if not self.in_use(ip):
                     break
+
+        logger.debug(f'Next free IP address: {ip} to {chaddr}')
+        return ip
+
+    def allocate(self, chaddr, reqip=None, meta=None) -> IPv4Address:
+        '''Allocate an IP address'''
+        if chaddr in self.bindings:
+            # Client already has an address. Renew
+            self.bindings[chaddr]['refreshed'] = datetime.now()
+            return self.bindings[chaddr]['ip']
+
+        ip = self.get_next_free(chaddr, reqip)
+
         # How to get a timestamp in python
         binding = {'ip': ip, 'chaddr': chaddr, 'state': 'BOUND',
                    'created': datetime.now(), 'meta': meta}
@@ -148,7 +201,7 @@ class DHCPServer():
         while True:
             ip = pool.allocate(chaddr, meta=meta)
             logger.debug(f'Probing address: {ip}')
-            if self.vpp.vpp_probe_is_duplicate(ifindex, chaddr, ip) is False:
+            if not self.vpp.vpp_probe_is_duplicate(ifindex, chaddr, ip):
                 break
             logger.warning(f'***Already in use: {ip} {chaddr}')
             pool.declined(chaddr, ip)
@@ -178,11 +231,12 @@ class DHCPServer():
             # Reserve a new address
             ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex, meta=metainfo)
             logger.debug(f'DISCOVER: {chaddrstr}: {ip}')
-
+            dst_ip = '255.255.255.255'
         elif msgtype == 3: # request
             # Allocate new address
             ip = pool.allocate(chaddr, reqip, meta=metainfo)
             logger.debug(f'REQUEST/RENEW: {chaddrstr}: {ip}')
+            dst_ip = ip
         elif msgtype == 4: # decline
             # Address declined, like duplicate
             pool.declined(chaddr, reqip)
@@ -208,7 +262,7 @@ class DHCPServer():
         repb.chaddr = req[BOOTP].chaddr # Client hardware address
         del repb.payload
         resp = (Ether(src=interface_info.mac, dst=mac) /
-                IP(src=dhcp_server_ip, dst=ip) /
+                IP(src=dhcp_server_ip, dst=dst_ip) /
                 UDP(sport=req.dport, dport=req.sport) / repb)  # noqa: E501
 
         dhcp_options = [
