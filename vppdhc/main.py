@@ -39,6 +39,7 @@ class ConfDHCP4Server(BaseModel):
     lease_time: int = Field(alias='lease-time')
     renewal_time: int = Field(alias='renewal-time')
     dns: list[IPv4Address]
+    bypass_tenant: int = Field(alias='bypass-tenant')
 
 class ConfDHCP6PDClient(BaseModel):
     interface: str

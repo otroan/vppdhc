@@ -248,4 +248,12 @@ class VPP():
         r = self.vpp.api.vcdp_nat_bind_set_unset(tenant_id=tenant_id,
                                                  nat_id=nat_id,
                                                  is_set=is_set)
+
+    def vpp_vcdp_session_add(self, tenant_id, src, dst, protocol, sport, dport):
+        r = self.vpp.api.vcdp_session_add(tenant_id=tenant_id,
+                                          src=src,
+                                          dst=dst,
+                                          protocol=protocol,
+                                          sport=sport,
+                                          dport=dport)
         print('RV', r)

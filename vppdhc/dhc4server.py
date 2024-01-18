@@ -193,8 +193,10 @@ class DHCPServer():
         self.renewal_time = conf.renewal_time
         self.lease_time = conf.lease_time
         self.name_server = conf.dns
+        self.tenant_id = conf.bypass_tenant
 
         self.bindings = {}
+        self.interface_info = {}
 
     def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
         '''Allocate an IP address with a probe'''
@@ -256,10 +258,11 @@ class DHCPServer():
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
         repb.yiaddr = ip                # Your client address
-        repb.siaddr = 0                 # Next server
+        repb.siaddr = dhcp_server_ip    # Next server
         repb.ciaddr = 0                 # Client address
         repb.giaddr = req[BOOTP].giaddr # Relay agent IP
         repb.chaddr = req[BOOTP].chaddr # Client hardware address
+        repb.sname = "vppdhcpd"         # Server name not given
         del repb.payload
         resp = (Ether(src=interface_info.mac, dst=mac) /
                 IP(src=dhcp_server_ip, dst=dst_ip) /
@@ -275,9 +278,9 @@ class DHCPServer():
                 ("server_id", dhcp_server_ip),
                 ("router", dhcp_server_ip),
                 ("name_server", self.name_server[0]),
-                ("broadcast_address", pool.broadcast_address()),
+                # ("broadcast_address", pool.broadcast_address()),
                 ("subnet_mask", pool.subnet_mask()),
-                ("renewal_time", self.renewal_time),
+                # ("renewal_time", self.renewal_time),
                 ("lease_time", self.lease_time),
                 # ('classless_static_routes', ['12.0.0.0/8:169.254.1.1']),
             ]
@@ -308,18 +311,22 @@ class DHCPServer():
             if reqb.op != 1:
                 continue
 
-            ifindex = packet[VPPPunt].iface_index
-            interface_info = self.vpp.vpp_interface_info(ifindex)
 
             # Check if pool for the IP prefix on the interface exists
             # If not create one
+            ifindex = packet[VPPPunt].iface_index
             try:
                 pool = self.bindings[ifindex]
+                interface_info = self.interface_info[ifindex]
             except KeyError:
-                # Create a pool
+                # Create a pool on a given interface
+                interface_info = self.vpp.vpp_interface_info(ifindex)
+                self.interface_info[ifindex] = interface_info
                 pool = self.bindings[ifindex] = DHCPBinding(interface_info.ip4[0].network)
                 pool.reserve_ip(interface_info.ip4[0].ip) # Reserve the router address
 
+                # Add a 3-tuple session so to get DHCP unicast packets
+                self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
             reply = self.process_packet(interface_info, pool, packet)
             if not reply:
                 continue
