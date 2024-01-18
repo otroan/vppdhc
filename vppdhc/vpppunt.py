@@ -251,6 +251,7 @@ class VPP():
 
     def vpp_vcdp_session_add(self, tenant_id, src, dst, protocol, sport, dport):
         r = self.vpp.api.vcdp_session_add(tenant_id=tenant_id,
+                                          context_id=0,
                                           src=src,
                                           dst=dst,
                                           protocol=protocol,

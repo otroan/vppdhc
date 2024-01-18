@@ -11,7 +11,6 @@ from scapy.layers.inet6 import (IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, ICMPv6N
 
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
-from IPython import embed
 
 
 # TODO: Add support for sending on multiple interfaces

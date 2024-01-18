@@ -198,6 +198,10 @@ class DHCPServer():
         self.bindings = {}
         self.interface_info = {}
 
+        # Clients send from their unicast address to 255.255.255.255:67
+        self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, '255.255.255.255', 17, 0, 67)
+
+
     def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
         '''Allocate an IP address with a probe'''
         while True:
@@ -331,7 +335,7 @@ class DHCPServer():
             if not reply:
                 continue
             reply = VPPPunt(iface_index=ifindex, action=Actions.PUNT_L2) / reply
-            # reply.show2()
+            # reply.sho w2()
 
             await writer.send(bytes(reply))
             # pool.dump()
