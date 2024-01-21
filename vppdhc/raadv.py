@@ -83,8 +83,6 @@ class IP6NDRA():
                 ra /= ICMPv6NDOptPREF64(prefix=self.pref64.network_address, scaledlifetime=8191)
             ra = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / ra
             # ra.show2()
-            print('Sending RA')
-            ra.show2()
             await writer.send(bytes(ra))
 
             # Receive on uds socket
