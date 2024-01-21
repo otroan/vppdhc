@@ -258,3 +258,7 @@ class VPP():
                                           sport=sport,
                                           dport=dport)
         print('RV', r)
+
+    def vpp_ip_multicast_group_join(self, group):
+        r = self.vpp.api.ip_multicast_group_join(grp_address=group)
+        print('RV', r)

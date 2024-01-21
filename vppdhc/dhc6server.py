@@ -56,7 +56,7 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
         self.duid = DUID_LL(lladdr=self.interface_info.mac)
 
         # Add a route in the MFIB for the all DHCP servers and relays address
-        self.vpp.vpp_ip6_mreceive('ff02::1:2/128')
+        self.vpp.vpp_ip_multicast_group_join('ff02::1:2')
 
     def mk_address(self, clientduid, iaid):
         '''Create an IPv6 address from the client's DUID and IAID'''

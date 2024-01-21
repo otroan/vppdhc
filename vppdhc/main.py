@@ -118,7 +118,11 @@ async def setup_tasks(conf, vpp):
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 547) # pylint: disable=no-member
-        server = DHCPv6Server(socket, vpp_socket, vpp, conf.dhc6server)
+        try:
+            server = DHCPv6Server(socket, vpp_socket, vpp, conf.dhc6server)
+        except Exception as e:
+            logger.error(f'Error setting up DHCPv6 server: {e}')
+            sys.exit(1)
         tasks.append(server())
 
     # RA advertisement
