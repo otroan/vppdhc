@@ -50,10 +50,9 @@ def vpp_callback_default(msg):
 class VPP():
     '''VPP API wrapper'''
 
-    def __init__(self, apidir, vpp_callback=vpp_callback_default):
+    def __init__(self, vpp_callback=vpp_callback_default):
         # VPP API socket
-        VPPApiClient.apidir = apidir
-        vpp = VPPApiClient()
+        vpp = VPPApiClient(bootstrapapi=True)
         vpp.register_event_callback(vpp_callback)
 
         # Give VPP 5 seconds to come up

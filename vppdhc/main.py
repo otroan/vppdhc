@@ -139,7 +139,6 @@ async def setup_tasks(conf, vpp):
 
 @app.command()
 def main(config: typer.FileText,
-         apidir: str,
          log: str = None,
          logfile: str = None,
          version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True), # pylint: disable=unused-argument
@@ -165,7 +164,7 @@ def main(config: typer.FileText,
 
     logger.debug('Configuration %s', validatedconf)
 
-    vpp = VPP(apidir, None)
+    vpp = VPP(None)
 
     tasks = setup_tasks(validatedconf, vpp)
 
