@@ -15,7 +15,7 @@ from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, DHCP6_Decli
                                 DHCP6_Reply, DHCP6_Renew, DHCP6OptClientId, DHCP6OptServerId,
                                 DHCP6OptIA_NA, DHCP6OptIAAddress, DUID_LL,
                                 DHCP6OptDNSServers, DHCP6OptStatusCode,
-                                DHCP6_InformationRequest)
+                                DHCP6_InfoRequest)
 from scapy.layers.inet6 import IPv6, UDP
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
@@ -208,7 +208,7 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
                 reply = self.process_release(request, trid)
             elif request.haslayer(DHCP6_Decline):
                 reply = self.process_decline(request, trid)
-            elif request.haslayer(DHCP6_InformationRequest):
+            elif request.haslayer(DHCP6_InfoRequest):
                 logger.debug('Received DHCPv6 Information Request')
                 continue
             else:
