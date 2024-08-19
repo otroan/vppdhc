@@ -84,7 +84,6 @@ class DHCPv6PDClient():
         # Install default route. TODO: Might be replaced by router discovery at some point
         # rv = self.vpp.api.cli_inband(cmd=f'ip route add ::/0 via {nexthop} {self.if_name}')
         rv = self.vpp.vpp_ip6_route_add('::/0', nexthop, self.if_index)
-        logger.debug(f'Adding route {rv}')
 
         # Normally with DHCPv6 PD one would install a blackhole route for the delegated prefix.
         # With NPT66 we don't need to do that, since the prefix is translated to the internal prefix

@@ -194,6 +194,7 @@ class DHCPServer():
         self.lease_time = conf.lease_time
         self.name_server = conf.dns
         self.tenant_id = conf.bypass_tenant
+        self.ipv6_only_preferred = conf.ipv6_only_preferred
 
         self.bindings = {}
         self.interface_info = {}
@@ -223,6 +224,10 @@ class DHCPServer():
 
         reqip = options.get('requested_addr', None)
         hostname = options.get('hostname', '')
+        params = options.get('param_req_list', [])
+        # Check if 108 is set in params
+        if 108 in params:
+            logger.debug(f'Parameter 108 is set in params {params} {req[Ether].src}')
 
         metainfo = {'hostname': hostname}
 

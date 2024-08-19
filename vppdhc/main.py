@@ -39,6 +39,7 @@ class ConfDHCP4Server(BaseModel):
     lease_time: int = Field(alias='lease-time')
     renewal_time: int = Field(alias='renewal-time')
     dns: list[IPv4Address]
+    ipv6_only_preferred: bool = Field(alias='ipv6-only-preferred', default=False)
     bypass_tenant: int = Field(alias='bypass-tenant')
 
 class ConfDHCP6PDClient(BaseModel):

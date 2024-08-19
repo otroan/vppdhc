@@ -93,7 +93,7 @@ class IP6NDRA():
                 logger.debug(f'WAITED in receive {time.time() - now}')
                 next_periodic  -= (time.time() - now)
             except asyncio.TimeoutError:
-                logger.info(f'Timeout {waited}')
+                logger.debug(f'Timeout {waited}')
                 solicit = None
                 next_periodic = self.rt
                 continue

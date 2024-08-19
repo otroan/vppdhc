@@ -9,15 +9,16 @@ import asyncio
 import hashlib
 from typing import Any
 from ipaddress import IPv6Address
-from scapy.layers.l2 import Ether
-from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, DHCP6_Decline, DHCP6_Rebind,
+from scapy.layers.l2 import Ether # type: ignore
+from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, # type: ignore
+                                DHCP6_Decline, DHCP6_Rebind,
                                 DHCP6_Request, DHCP6_Advertise, DHCP6_Confirm,
                                 DHCP6_Reply, DHCP6_Renew, DHCP6OptClientId, DHCP6OptServerId,
                                 DHCP6OptIA_NA, DHCP6OptIAAddress, DUID_LL,
                                 DHCP6OptDNSServers, DHCP6OptStatusCode,
                                 DHCP6_InfoRequest)
-from scapy.layers.inet6 import IPv6, UDP
-import asyncio_dgram
+from scapy.layers.inet6 import IPv6, UDP # type: ignore
+import asyncio_dgram # type: ignore
 from vppdhc.vpppunt import VPPPunt, Actions
 
 # Configuration
