@@ -154,6 +154,10 @@ class DHCPBinding():
         except KeyError:
             logger.info(f'Decline with no binding for {chaddr}')
 
+    def mark_as_in_use(self, chaddr, ip):
+        '''Mark an IP address as in use'''
+        self.pool[ip] = 'in_use'
+
     def broadcast_address(self):
         '''Return broadcast address'''
         return self.prefix.broadcast_address
@@ -211,7 +215,9 @@ class DHCPServer():
             if not self.vpp.vpp_probe_is_duplicate(ifindex, chaddr, ip):
                 break
             logger.warning(f'***Already in use: {ip} {chaddr}')
-            pool.declined(chaddr, ip)
+
+            # Mark the address as already allocated
+            pool.mark_as_in_use(chaddr, ip)
         return ip
 
     def process_packet(self, interface_info, pool, req): # pylint: disable=too-many-locals
