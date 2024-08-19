@@ -225,9 +225,7 @@ class DHCPServer():
         reqip = options.get('requested_addr', None)
         hostname = options.get('hostname', '')
         params = options.get('param_req_list', [])
-        # Check if 108 is set in params
-        if 108 in params:
-            logger.debug(f'Parameter 108 is set in params {params} {req[Ether].src}')
+        include_108 = None
 
         metainfo = {'hostname': hostname}
 
@@ -264,6 +262,9 @@ class DHCPServer():
         mac = req[Ether].src
         dhcp_server_ip = interface_info.ip4[0].ip
 
+        if 108 in params and self.ipv6_only_preferred and msgtype in (1, 3):
+            include_108 = 0 # Default wait time
+
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
         repb.yiaddr = ip                # Your client address
@@ -291,6 +292,7 @@ class DHCPServer():
                 ("subnet_mask", pool.subnet_mask()),
                 # ("renewal_time", self.renewal_time),
                 ("lease_time", self.lease_time),
+                ("ipv6-only-preferred", include_108),
                 # ('classless_static_routes', ['12.0.0.0/8:169.254.1.1']),
             ]
             if x[1] is not None
