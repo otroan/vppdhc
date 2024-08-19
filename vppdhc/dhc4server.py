@@ -123,7 +123,7 @@ class DHCPBinding():
         if chaddr in self.bindings:
             # Client already has an address. Renew
             self.bindings[chaddr]['refreshed'] = datetime.now()
-            return self.bindings[chaddr]['ip']
+            return self.bindings[chaddr]['ip'], True
 
         ip = self.get_next_free(chaddr, reqip)
 
@@ -134,7 +134,7 @@ class DHCPBinding():
         self.pool[ip] = self.bindings[chaddr]
 
         logger.debug(f'Allocating IP address: {ip} to {chaddr}')
-        return ip
+        return ip, False
 
 
     def release(self, chaddr):
@@ -210,7 +210,9 @@ class DHCPServer():
     def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
         '''Allocate an IP address with a probe'''
         while True:
-            ip = pool.allocate(chaddr, meta=meta)
+            ip, existing = pool.allocate(chaddr, meta=meta)
+            if existing:
+                break
             logger.debug(f'Probing address: {ip}')
             if not self.vpp.vpp_probe_is_duplicate(ifindex, chaddr, ip):
                 break
