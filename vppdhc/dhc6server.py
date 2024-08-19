@@ -75,8 +75,8 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
         iaid = solicit[DHCP6OptIA_NA].iaid
 
         ipv6 = self.mk_address(clientduid, iaid)
-        logger.debug('Allocating IPv6 address %s to client %s '
-                      'from %s', ipv6, clientduid, solicit[IPv6].src)
+        logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} '
+                     f'from {solicit[IPv6].src}')
         t1 = int(0.5 * self.preflft)
         t2 = int(0.875 * self.preflft)
 
@@ -111,10 +111,10 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
         ipv6 = self.mk_address(clientduid, iaid)
         if msgtype == 3:
             logger.debug(f'Allocating IPv6 address {ipv6} to client '
-                          '{clientduid} from {request[IPv6].src}')
+                         f'{clientduid} from {request[IPv6].src}')
         else:
             logger.debug(f'Refreshing IPv6 address {ipv6} to client '
-                          '{clientduid} from {request[IPv6].src}')
+                         f'{clientduid} from {request[IPv6].src}')
 
         t1 = int(0.5 * self.preflft)
         t2 = int(0.875 * self.preflft)
@@ -140,7 +140,7 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
 
     def process_release(self, release, trid):
         '''Process a DHCPv6 Release packet'''
-        logger.error('Received DHCPv6 Release %s', release.show2(dump=True))
+        logger.error(f'Received DHCPv6 Release {release.show2(dump=True)}')
         clientid = release[DHCP6OptClientId]
         clientduid = clientid.duid
 
@@ -156,7 +156,7 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
 
     def process_decline(self, decline, trid):
         '''Process a DHCPv6 Decline packet'''
-        logger.error('Received DHCPv6 Decline %s', decline.show2(dump=True))
+        logger.error(f'Received DHCPv6 Decline {decline.show2(dump=True)}')
         clientid = decline[DHCP6OptClientId]
         clientduid = clientid.duid
 
