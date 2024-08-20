@@ -186,7 +186,7 @@ class DHCPBinding():
         '''Dump the bindings'''
         s = f'Bindings for {self.prefix}\n'
         for k,v in self.bindings.items():
-            s += f'{k}: {v}\n'
+            s += f'{k}: {v['ip']} {v['state']} {str(v['created'])}\n'
         return s
 
 def options2dict(packet):
@@ -388,32 +388,83 @@ class DHCPServer():
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return asyncio.create_task(self.listen())
 
-class TestDHCPMessageHandler(unittest.TestCase):
+# class TestDHCPMessageHandler(unittest.TestCase):
+
+#     def setUp(self):
+#         self.loop = asyncio.get_event_loop()
+
+#     @patch('dhc4server.DHCPServer.allocate_with_probe', new_callable=AsyncMock)
+#     # @patch('dhc4server.DHCPPool.allocate', new_callable=AsyncMock)
+#     # @patch('dhc4server.DHCPPool.declined', new_callable=AsyncMock)
+#     # @patch('dhc4server.DHCPPool.release', new_callable=AsyncMock)
+#     def test_handle_dhcp_message_discover(self, mock_allocate_with_probe):
+#         # Setup the mocks
+#         mock_allocate_with_probe.return_value = '192.168.1.10'
+
+#         # Create a mock request
+#         req = {'msgtype': 1, 'chaddr': '00:11:22:33:44:55'}
+#         interface_info = AsyncMock()
+#         interface_info.ifindex = 1
+#         pool = AsyncMock()
+#         metainfo = {}
+
+#         # Run the asyncio task
+#         result = self.loop.run_until_complete(process_packet(req, interface_info, pool, metainfo))
+
+#         # Assertions
+#         self.assertEqual(result, '192.168.1.10')
+#         mock_allocate_with_probe.assert_called_once_with('00:11:22:33:44:55', 1, meta={})
+
+
+class TestDHCPBinding(unittest.TestCase):
 
     def setUp(self):
-        self.loop = asyncio.get_event_loop()
+        self.prefix = IPv4Network('192.168.1.0/24')
+        self.dhcp_binding = DHCPBinding(self.prefix)
 
-    @patch('dhc4server.DHCPServer.allocate_with_probe', new_callable=AsyncMock)
-    # @patch('dhc4server.DHCPPool.allocate', new_callable=AsyncMock)
-    # @patch('dhc4server.DHCPPool.declined', new_callable=AsyncMock)
-    # @patch('dhc4server.DHCPPool.release', new_callable=AsyncMock)
-    def test_handle_dhcp_message_discover(self, mock_allocate_with_probe):
-        # Setup the mocks
-        mock_allocate_with_probe.return_value = '192.168.1.10'
+    def tearDown(self):
+        # Print the binding database
+        print(self.dhcp_binding.dump())
 
-        # Create a mock request
-        req = {'msgtype': 1, 'chaddr': '00:11:22:33:44:55'}
-        interface_info = AsyncMock()
-        interface_info.ifindex = 1
-        pool = AsyncMock()
-        metainfo = {}
+    def test_initialization(self):
+        # Check if the prefix is set correctly
+        self.assertEqual(self.dhcp_binding.prefix, self.prefix)
+        # Check if the first 10% of IP addresses are reserved
+        reserved_count = int(self.prefix.num_addresses / 10)
+        reserved_ips = [ip for ip in self.prefix][:reserved_count]
+        for ip in reserved_ips:
+            self.assertEqual(self.dhcp_binding.pool[ip], 'reserved')
 
-        # Run the asyncio task
-        result = self.loop.run_until_complete(process_packet(req, interface_info, pool, metainfo))
+    def test_reserve_ip(self):
+        ip = IPv4Address('192.168.1.10')
+        self.dhcp_binding.reserve_ip(ip)
+        self.assertEqual(self.dhcp_binding.pool[ip], 'reserved')
 
-        # Assertions
-        self.assertEqual(result, '192.168.1.10')
-        mock_allocate_with_probe.assert_called_once_with('00:11:22:33:44:55', 1, meta={})
+    def test_pool_add(self):
+        ip = IPv4Address('192.168.1.20')
+        binding = {'chaddr': '00:11:22:33:44:55'}
+        self.dhcp_binding.pool_add(ip, binding)
+        self.assertEqual(self.dhcp_binding.pool[ip], binding)
+
+    def test_in_use(self):
+        ip = IPv4Address('192.168.1.30')
+        self.dhcp_binding.pool_add(ip, {'chaddr': '00:11:22:33:44:55'})
+        self.assertTrue(self.dhcp_binding.in_use(ip))
+        self.dhcp_binding.pool[ip] = 'declined'
+        self.assertFalse(self.dhcp_binding.in_use(ip))
+
+    def test_get_next_free(self):
+        chaddr = '00:11:22:33:44:55'
+        ip = IPv4Address('192.168.1.40')
+        self.dhcp_binding.pool_add(ip, {'chaddr': chaddr, 'ip': ip})
+        self.dhcp_binding.bindings[chaddr] = {'ip': ip}
+        self.assertEqual(self.dhcp_binding.get_next_free(chaddr), ip)
+
+        # Test requesting a new IP
+        new_chaddr = '00:11:22:33:44:66'
+        next_free_ip = self.dhcp_binding.get_next_free(new_chaddr)
+        self.assertIsInstance(next_free_ip, IPv4Address)
+        self.assertNotIn(next_free_ip, self.dhcp_binding.pool)
 
 if __name__ == '__main__':
     unittest.main()

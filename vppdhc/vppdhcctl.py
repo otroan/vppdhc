@@ -1,18 +1,15 @@
 import asyncio
-import typer
+import typer # pylint: disable=import-error
 
 app = typer.Typer()
 
 async def send_command(socket_path, command):
     reader, writer = await asyncio.open_unix_connection(socket_path)
-
-    print(f'Sending command: {command}')
     writer.write(command.encode())
     await writer.drain()
-
     response = await reader.read(100)
-    print(f'Received response: {response.decode()}')
-
+    if response:
+        print(f'{response.decode()}')
     writer.close()
     await writer.wait_closed()
 
