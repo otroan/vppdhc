@@ -281,7 +281,7 @@ class DHCPServer():
             dst_ip = '255.255.255.255'
         elif msgtype == 3: # request
             # Allocate new address
-            ip = pool.allocate(chaddr, reqip, meta=metainfo)
+            ip, existing = pool.allocate(chaddr, reqip, meta=metainfo)
             logger.debug(f'REQUEST/RENEW: {chaddrstr}: {ip}')
             dst_ip = ip
         elif msgtype == 4: # decline
