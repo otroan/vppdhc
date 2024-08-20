@@ -186,7 +186,7 @@ class DHCPBinding():
         '''Dump the bindings'''
         s = f'Bindings for {self.prefix}\n'
         for k,v in self.bindings.items():
-            s += f'{k}: {v['ip']} {v['state']} {str(v['created'])}\n'
+            s += f'{k}: {v["ip"]} {v["state"]} {str(v["created"])}\n'
         return s
 
 def options2dict(packet):
