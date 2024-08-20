@@ -16,6 +16,7 @@ from vppdhc.dhc4server import DHCPServer
 from vppdhc.dhc6pdclient import DHCPv6PDClient
 from vppdhc.dhc6server import DHCPv6Server
 from vppdhc.raadv import IP6NDRA
+from vppdhc.vppdhcdctl import VPPDHCD
 from vppdhc.vpppunt import VPP, VppEnum
 from vppdhc._version import __version__
 
@@ -65,7 +66,7 @@ class ConfIP6NDRA(BaseModel):
 
 class Configuration(BaseModel):
     '''Configuration model'''
-    vpp: ConfVPP
+    vpp: ConfVPP = None
     dhc4client: ConfDHCP4Client = None
     dhc4server: ConfDHCP4Server = None
     dhc6pdclient: ConfDHCP6PDClient = None
@@ -82,6 +83,10 @@ def version_callback(value: bool):
 async def setup_tasks(conf, vpp):
     '''Setup the tasks'''
     tasks = []
+
+    # Initialise the control socket
+    vppdhcdctl = VPPDHCD('/tmp/vppdhcd.sock')
+    tasks.append(vppdhcdctl())
 
     # DHCPv4 client
     if conf.dhc4client:
@@ -165,7 +170,9 @@ def main(config: typer.FileText,
 
     logger.debug('Configuration %s', validatedconf)
 
-    vpp = VPP(None)
+    vpp = None
+    if validatedconf.vpp:
+        vpp = VPP(None)
 
     tasks = setup_tasks(validatedconf, vpp)
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
 '''
@@ -5,6 +6,8 @@ DHCPv4 server
 '''
 
 import logging
+import unittest
+from unittest.mock import patch, AsyncMock
 from datetime import datetime
 import asyncio
 import hashlib
@@ -16,12 +19,25 @@ from scapy.layers.inet import IP, UDP
 from scapy.utils import str2mac
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
+from vppdhc.vppdhcdctl import register_command
 
 logger = logging.getLogger(__name__)
 
 ##### DHCP Binding database #####
 
-from ipaddress import IPv4Address
+@register_command('dhcp', 'bindings')
+def command_dhcp_binding(args=None):
+    '''Show DHCP bindings'''
+    if args:
+        return f'Binding command with args: {args}'
+    # Get DHCPServer singleton instance
+
+    dhcp = DHCPServer.get_instance()
+    s = ''
+    for k,v in dhcp.bindings.items():
+        s += f'Bindings for: {k}'
+        s += v.dump()
+    return s
 
 class DHCPPool(dict):
     def __init__(self, *args, **kwargs):
@@ -168,8 +184,10 @@ class DHCPBinding():
 
     def dump(self):
         '''Dump the bindings'''
+        s = f'Bindings for {self.prefix}\n'
         for k,v in self.bindings.items():
-            print('KV', k, v)
+            s += f'{k}: {v}\n'
+        return s
 
 def options2dict(packet):
     '''Get DHCP message type'''
@@ -188,6 +206,13 @@ def chaddr2str(v):
 
 class DHCPServer():
     '''DHCPv4 Server'''
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self, receive_socket, send_socket, vpp, conf):
         '''DHCPv4 Server'''
         self.receive_socket = receive_socket
@@ -206,6 +231,11 @@ class DHCPServer():
         # Clients send from their unicast address to 255.255.255.255:67
         self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, '255.255.255.255', 17, 0, 67)
 
+    @classmethod
+    def get_instance(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = cls(*args, **kwargs)
+        return cls._instance
 
     def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
         '''Allocate an IP address with a probe'''
@@ -357,3 +387,33 @@ class DHCPServer():
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return asyncio.create_task(self.listen())
+
+class TestDHCPMessageHandler(unittest.TestCase):
+
+    def setUp(self):
+        self.loop = asyncio.get_event_loop()
+
+    @patch('dhc4server.DHCPServer.allocate_with_probe', new_callable=AsyncMock)
+    # @patch('dhc4server.DHCPPool.allocate', new_callable=AsyncMock)
+    # @patch('dhc4server.DHCPPool.declined', new_callable=AsyncMock)
+    # @patch('dhc4server.DHCPPool.release', new_callable=AsyncMock)
+    def test_handle_dhcp_message_discover(self, mock_allocate_with_probe):
+        # Setup the mocks
+        mock_allocate_with_probe.return_value = '192.168.1.10'
+
+        # Create a mock request
+        req = {'msgtype': 1, 'chaddr': '00:11:22:33:44:55'}
+        interface_info = AsyncMock()
+        interface_info.ifindex = 1
+        pool = AsyncMock()
+        metainfo = {}
+
+        # Run the asyncio task
+        result = self.loop.run_until_complete(process_packet(req, interface_info, pool, metainfo))
+
+        # Assertions
+        self.assertEqual(result, '192.168.1.10')
+        mock_allocate_with_probe.assert_called_once_with('00:11:22:33:44:55', 1, meta={})
+
+if __name__ == '__main__':
+    unittest.main()
