@@ -85,8 +85,11 @@ async def setup_tasks(conf, vpp):
     tasks = []
 
     # Initialise the control socket
-    vppdhcdctl = VPPDHCD('/tmp/vppdhcd.sock')
-    tasks.append(vppdhcdctl())
+    try:
+        vppdhcdctl = VPPDHCD('/tmp/vppdhcd.sock')
+        tasks.append(vppdhcdctl())
+    except Exception as e:
+        logger.error(f'***Error setting up control socket: {e}')
 
     # DHCPv4 client
     if conf.dhc4client:
