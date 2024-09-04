@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pylint: disable=import-error, invalid-name, logging-fstring-interpolation
+from vppdhc.hello import hello
 
 '''
 DHCPv4 server
