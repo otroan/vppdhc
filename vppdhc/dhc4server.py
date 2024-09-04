@@ -20,8 +20,15 @@ from scapy.utils import str2mac
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
 from vppdhc.vppdhcdctl import register_command
+from pydantic import BaseModel
+from enum import Enum
+from typing import Dict
 
 logger = logging.getLogger(__name__)
+
+class DHC4ServerNoIPaddrAvailable(Exception):
+    '''No IP address available'''
+
 
 ##### DHCP Binding database #####
 
@@ -35,9 +42,31 @@ def command_dhcp_binding(args=None):
     dhcp = DHCPServer.get_instance()
     s = ''
     for k,v in dhcp.bindings.items():
-        s += f'Bindings for: {k}'
+        s += f'DHCPv4 Bindings interface: {k}\n'
         s += v.dump()
     return s
+
+class BindingState(Enum):
+    BOUND = 'BOUND'
+    DECLINED = 'DECLINED'
+    IN_USE = 'IN_USE'
+    RESERVED = 'RESERVED'
+
+class Chaddr():
+    def __init__(self, chaddr):
+        self.chaddr = chaddr
+
+class Binding(BaseModel):
+    ip: IPv4Address
+    chaddr: Chaddr
+    state: BindingState
+    created: datetime
+    meta: dict
+
+class Bindings(BaseModel):
+    interface: str
+    prefix: IPv4Network
+    bindings: Dict[str, Binding]
 
 class DHCPPool(dict):
     def __init__(self, *args, **kwargs):
@@ -100,14 +129,14 @@ class DHCPBinding():
 
     def reserve_ip(self, ip):
         '''Reserve an IP address'''
-        self.pool[ip] = 'reserved'
+        self.pool[ip] = BindingState.RESERVED
 
     def pool_add(self, ip: IPv4Address, binding: dict):
         '''Add an IP address to the pool'''
         self.pool[ip] = binding
 
     def in_use(self, ip):
-        return False if ip in self.pool and self.pool[ip] == 'declined' else ip in self.pool
+        return False if ip in self.pool and self.pool[ip] == BindingState.DECLINED else ip in self.pool
 
     def get_next_free(self, chaddr, reqip=None) -> IPv4Address:
         if chaddr in self.bindings:
@@ -130,27 +159,28 @@ class DHCPBinding():
                 # Check if ip is in bindings
                 if not self.in_use(ip):
                     break
-
+            else:
+                raise DHC4ServerNoIPaddrAvailable('No free IP addresses available')
         logger.debug(f'Next free IP address: {ip} to {chaddr}')
         return ip
 
-    def allocate(self, chaddr, reqip=None, meta=None) -> IPv4Address:
-        '''Allocate an IP address'''
-        if chaddr in self.bindings:
-            # Client already has an address. Renew
-            self.bindings[chaddr]['refreshed'] = datetime.now()
-            return self.bindings[chaddr]['ip'], True
+    def reserve(self, chaddr, reqip=None, meta=None) -> IPv4Address:
+        '''Reserve a new IP address'''
+        # if chaddr in self.bindings:
+        #     # Client already has an address. Renew
+        #     self.bindings[chaddr].refreshed = datetime.now()
+        #     return self.bindings[chaddr].ip, True
 
         ip = self.get_next_free(chaddr, reqip)
 
         # How to get a timestamp in python
-        binding = {'ip': ip, 'chaddr': chaddr, 'state': 'BOUND',
-                   'created': datetime.now(), 'meta': meta}
+        binding = Binding(ip=ip, chaddr=chaddr, state=BindingState.OFFERED,
+                          created=datetime.now(), meta=meta)
         self.bindings[chaddr] = binding
         self.pool[ip] = self.bindings[chaddr]
 
-        logger.debug(f'Allocating IP address: {ip} to {chaddr}')
-        return ip, False
+        logger.debug(f'Reservering IP address: {ip} to {chaddr}')
+        return ip
 
 
     def release(self, chaddr):
@@ -164,7 +194,7 @@ class DHCPBinding():
 
     def declined(self, chaddr, ip):
         '''Mark an IP address as declined'''
-        self.pool[ip] = 'declined'
+        self.pool[ip] = BindingState.DECLINED
         try:
             del self.bindings[chaddr]
         except KeyError:
@@ -172,7 +202,7 @@ class DHCPBinding():
 
     def mark_as_in_use(self, chaddr, ip):
         '''Mark an IP address as in use'''
-        self.pool[ip] = 'in_use'
+        self.pool[ip] = BindingState.IN_USE
 
     def broadcast_address(self):
         '''Return broadcast address'''
@@ -203,6 +233,29 @@ def chaddr2str(v):
     if v[6:] == b"\x00" * 10:  # Default padding
         return f"{str2mac(v[:6])} (+ 10 nul pad)"
     return f"{str2mac(v[:6])} (pad: {v[6:]})"
+
+
+def nak(interface_info, dhcp_server_ip, dst_ip, req):
+    '''Create a NAK packet'''
+    mac = req[Ether].src
+    repb = req.getlayer(BOOTP).copy()
+    repb.op = "BOOTREPLY"
+    repb.yiaddr = 0
+    repb.siaddr = 0
+    repb.ciaddr = 0                 # Client address
+    repb.giaddr = req[BOOTP].giaddr # Relay agent IP
+    repb.chaddr = req[BOOTP].chaddr # Client hardware address
+    repb.sname = "vppdhcpd"         # Server name not given
+    del repb.payload
+    resp = (Ether(src=interface_info.mac, dst=mac) /
+            IP(src=dhcp_server_ip, dst=dst_ip) /
+            UDP(sport=req.dport, dport=req.sport) / repb)  # noqa: E501
+
+    dhcp_options = [("message-type", 'nak')]
+    dhcp_options.append("end")
+    resp /= DHCP(options=dhcp_options)
+    return resp
+
 
 class DHCPServer():
     '''DHCPv4 Server'''
@@ -237,23 +290,21 @@ class DHCPServer():
             cls._instance = cls(*args, **kwargs)
         return cls._instance
 
-    def allocate_with_probe(self, chaddr, pool, ifindex, meta=None):
-        '''Allocate an IP address with a probe'''
+    def reserve_with_probe(self, chaddr, pool, ifindex, meta=None):
+        '''Reserve an IP address with probe (OFFER)'''
         while True:
-            ip, existing = pool.allocate(chaddr, meta=meta)
-            if existing:
-                break
+            ip = pool.reserve(chaddr, meta=meta)
             logger.debug(f'Probing address: {ip}')
             if not self.vpp.vpp_probe_is_duplicate(ifindex, chaddr, ip):
                 break
             logger.warning(f'***Already in use: {ip} {chaddr}')
-
-            # Mark the address as already allocated
             pool.mark_as_in_use(chaddr, ip)
         return ip
 
     def process_packet(self, interface_info, pool, req): # pylint: disable=too-many-locals
         '''Process a DHCP packet'''
+        dhcp_server_ip = interface_info.ip4[0].ip
+
         if req[BOOTP].giaddr != '0.0.0.0':
             # Client must be on-link
             logger.error(f'**Ignoring request from non on-link client {req[Ether].src}')
@@ -263,6 +314,7 @@ class DHCPServer():
         reqip = options.get('requested_addr', None)
         hostname = options.get('hostname', '')
         params = options.get('param_req_list', [])
+        server_id = options.get('server_id', None)
         include_108 = None
 
         metainfo = {'hostname': hostname}
@@ -276,12 +328,30 @@ class DHCPServer():
         # chaddrstr = chaddr2str(chaddr)
         if msgtype == 1: # discover
             # Reserve a new address
-            ip = self.allocate_with_probe(chaddr, pool, interface_info.ifindex, meta=metainfo)
-            logger.debug(f'DISCOVER: {chaddrstr}: {ip}')
             dst_ip = '255.255.255.255'
+            try:
+                ip = self.reserve_with_probe(chaddr, pool, interface_info.ifindex, meta=metainfo)
+                logger.debug(f'DISCOVER: {chaddrstr}: {ip}')
+            except DHC4ServerNoIPaddrAvailable:
+                logger.error(f'*** ERROR No IP address available for {chaddrstr} ***')
+                return nak(interface_info, dhcp_server_ip, dst_ip, req)
         elif msgtype == 3: # request
-            # Allocate new address
-            ip, existing = pool.allocate(chaddr, reqip, meta=metainfo)
+            if server_id:
+                if server_id != dhcp_server_ip:
+                    # Someone else won
+                    pool.free_lease(chaddr)
+                    logger.error(f'*** ERROR Unknown server id {server_id} from {chaddrstr} ***')
+                    return None
+                # In response to a previous offer. Create a new lease.
+                ip = pool.confirm_offer(chaddr)
+                if not ip:
+                    return nak(interface_info, dhcp_server_ip, '255.255.255.255', req)
+                logger.debug(f'CONFIRM: {chaddrstr}: {ip}')
+            else:
+                # Verifying or extending an existing lease
+                ip = pool.verify_or_extend_lease(chaddr, reqip, meta=metainfo)
+                if not ip:
+                    return nak(interface_info, dhcp_server_ip, ip, req)
             logger.debug(f'REQUEST/RENEW: {chaddrstr}: {ip}')
             dst_ip = ip
         elif msgtype == 4: # decline
@@ -298,7 +368,6 @@ class DHCPServer():
             return None
 
         mac = req[Ether].src
-        dhcp_server_ip = interface_info.ip4[0].ip
 
         if 108 in params and self.ipv6_only_preferred and msgtype in (1, 3):
             include_108 = 0 # Default wait time
@@ -306,7 +375,7 @@ class DHCPServer():
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
         repb.yiaddr = ip                # Your client address
-        repb.siaddr = dhcp_server_ip    # Next server
+        repb.siaddr = 0 # dhcp_server_ip    # Next server
         repb.ciaddr = 0                 # Client address
         repb.giaddr = req[BOOTP].giaddr # Relay agent IP
         repb.chaddr = req[BOOTP].chaddr # Client hardware address
@@ -341,7 +410,6 @@ class DHCPServer():
 
     async def listen(self):
         '''Listen for DHCP requests'''
-
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
 
@@ -371,6 +439,8 @@ class DHCPServer():
                 # Create a pool on a given interface
                 interface_info = self.vpp.vpp_interface_info(ifindex)
                 self.interface_info[ifindex] = interface_info
+
+                # Create a new DHCPv4 pool based on the interface IP address/subnet
                 pool = self.bindings[ifindex] = DHCPBinding(interface_info.ip4[0].network)
                 pool.reserve_ip(interface_info.ip4[0].ip) # Reserve the router address
 
