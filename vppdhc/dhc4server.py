@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from vppdhc.hello import hello
-
 '''
 DHCPv4 server
 '''

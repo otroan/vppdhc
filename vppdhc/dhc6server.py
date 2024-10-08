@@ -70,36 +70,41 @@ class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
     def process_solicit(self, solicit):
         '''Process a DHCPv6 solicit/request packet'''
 
-        # Create an interface identifier from the client's DUID
-        clientid = solicit[DHCP6OptClientId]
-        clientduid = clientid.duid
-        iaid = solicit[DHCP6OptIA_NA].iaid
+        try:
+            # Create an interface identifier from the client's DUID
+            clientid = solicit[DHCP6OptClientId]
+            clientduid = clientid.duid
+            iaid = solicit[DHCP6OptIA_NA].iaid
 
-        ipv6 = self.mk_address(clientduid, iaid)
-        logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} '
-                     f'from {solicit[IPv6].src}')
-        t1 = int(0.5 * self.preflft)
-        t2 = int(0.875 * self.preflft)
+            ipv6 = self.mk_address(clientduid, iaid)
+            logger.debug(f'Allocating IPv6 address {ipv6} to client {clientduid} '
+                        f'from {solicit[IPv6].src}')
+            t1 = int(0.5 * self.preflft)
+            t2 = int(0.875 * self.preflft)
 
-        advertise = (Ether(src=self.interface_info.mac, dst=solicit[Ether].src) /
-                    IPv6(src=self.interface_info.ip6ll, dst=solicit[IPv6].src) /
-                    UDP(sport=547, dport=546) /
-                    DHCP6_Advertise(trid=solicit[DHCP6_Solicit].trid) /
-                    DHCP6OptServerId(duid=self.duid) /
-                    DHCP6OptClientId(duid=clientduid))
+            advertise = (Ether(src=self.interface_info.mac, dst=solicit[Ether].src) /
+                        IPv6(src=self.interface_info.ip6ll, dst=solicit[IPv6].src) /
+                        UDP(sport=547, dport=546) /
+                        DHCP6_Advertise(trid=solicit[DHCP6_Solicit].trid) /
+                        DHCP6OptServerId(duid=self.duid) /
+                        DHCP6OptClientId(duid=clientduid))
 
-        if self.dns:
-            advertise /= DHCP6OptDNSServers(dnsservers=self.dns)
+            if self.dns:
+                advertise /= DHCP6OptDNSServers(dnsservers=self.dns)
 
-        advertise /=  (DHCP6OptIA_NA(iaid=solicit[DHCP6OptIA_NA].iaid, T1=t1, T2=t2,
-                                  ianaopts = DHCP6OptIAAddress(addr=ipv6,
-                                                               preflft=self.preflft,
-                                                               validlft=self.validlft))
-                    )
+            advertise /=  (DHCP6OptIA_NA(iaid=solicit[DHCP6OptIA_NA].iaid, T1=t1, T2=t2,
+                                    ianaopts = DHCP6OptIAAddress(addr=ipv6,
+                                                                preflft=self.preflft,
+                                                                validlft=self.validlft))
+                        )
 
-        advertise = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / advertise
-        # advertise.show2()
-        return advertise
+            advertise = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / advertise
+            # advertise.show2()
+            return advertise
+        except IndexError:
+            # Dump the offending packet to the log
+            logger.error('Received DHCPv6 Solicit without IA_NA %s', solicit.show(dump=True))
+            return None
 
     def process_request(self, request, trid, msgtype):
         '''Process a DHCPv6 solicit/request packet'''
