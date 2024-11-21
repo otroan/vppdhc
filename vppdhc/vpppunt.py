@@ -13,6 +13,7 @@ from scapy.packet import Packet, bind_layers
 from scapy.fields import IntEnumField, LEIntField
 from scapy.layers.l2 import Ether
 from vpp_papi import VPPApiClient, VppEnum
+from vppdhc.datamodel import VPPInterfaceInfo
 from ipaddress import IPv6Network
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,8 @@ class Actions(IntEnum):
 
 # Define the custom header
 class VPPPunt(Packet): # pylint: disable=too-few-public-methods
-    '''VPP Punt header'''
+    """VPP Punt header."""
+
     name = "VPPPunt"
     fields_desc = [
         LEIntField("iface_index", 0),
@@ -43,8 +45,8 @@ bind_layers(VPPPunt, Ether)
 
 ##### VPP PUNT Protocol #####
 
-def vpp_callback_default(msg):
-    '''VPP callback function'''
+def vpp_callback_default(msg) -> None:
+    """VPP callback function."""
     logger.debug(f"Received VPP message: {msg}")
 
 class VPP():
@@ -69,19 +71,18 @@ class VPP():
         rv = self.vpp.api.show_version()
         logger.debug(f"VPP version: {rv}")
 
-    def vpp_interface_name2index(self, ifname):
+    def vpp_interface_name2index(self, ifname: str) -> int:
         '''Returns the interface index for the given interface name'''
         interface_details = self.vpp.api.sw_interface_dump(name_filter_valid=1, name_filter=ifname)
         if len(interface_details) != 1:
             raise VPPDHCException(f'Interface {ifname} not found')
         return interface_details[0].sw_if_index
 
-    def vpp_interface_info(self, ifindex):
-        '''Returns the interface info for the given interface index'''
+    def vpp_interface_info(self, ifindex: int) -> VPPInterfaceInfo:
+        """Returns the interface info for the given interface index."""
         # Define a named tuple
         if ifindex in self.interface_info:
             return self.interface_info[ifindex]
-        Interface = namedtuple('Interface', ['ifindex', 'name', 'mac', 'ip4', 'ip6', 'ip6ll'])
 
         interface_details = self.vpp.api.sw_interface_dump(sw_if_index=ifindex)
         address_details4 = self.vpp.api.ip_address_dump(sw_if_index=ifindex, is_ipv6=False)
@@ -91,12 +92,12 @@ class VPP():
         v4addrs = [x.prefix for x in address_details4]
         v6addrs = [x.prefix for x in address_details6]
 
-        interfaceinfo =  Interface(ifindex,
-                         interface_details[0].interface_name,
-                         interface_details[0].l2_address,
-                         v4addrs,
-                         v6addrs,
-                         link_local.ip)
+        interfaceinfo =  VPPInterfaceInfo(ifindex=ifindex,
+                         name=interface_details[0].interface_name,
+                         mac=interface_details[0].l2_address.packed,
+                         ip4=v4addrs,
+                         ip6=v6addrs,
+                         ip6ll=link_local.ip)
         self.interface_info[ifindex] = interfaceinfo
         logger.debug('Interface info: %s', interfaceinfo)
         return interfaceinfo

@@ -17,7 +17,9 @@ async def send_command(socket_path, command):
 def main(command: list[str] = typer.Argument(None, help="Arguments passed to the command")):
     '''Send a command to the VPPDHC control server'''
     socket_path = '/tmp/vppdhcd.sock'
-    command = ' '.join(command)
+    if not command:
+        return
+    command = " ".join(command)
     asyncio.run(send_command(socket_path, command))
 
 if __name__ == '__main__':

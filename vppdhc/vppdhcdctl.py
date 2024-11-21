@@ -28,12 +28,12 @@ async def handle_client(reader, writer):
     # Receive data from the client
     data = await reader.read(100)
     message = data.decode()
-
+    print('Received:', message)
     parts = message.split()
-    module = parts[0]
-    command = parts[1]
-    args = parts[2:]
-
+    module = parts[0] if len(parts) > 0 else None
+    command = parts[1] if len(parts) > 1 else None
+    args = parts[2:] if len(parts) > 2 else []
+    print(f"Module: {module}, Command: {command}, Args: {args}")
     try:
         response = command_registry[module][command](*args)
     except KeyError:
@@ -56,13 +56,10 @@ class VPPDHCD():
 
         server = await asyncio.start_unix_server(handle_client, path=self.socket_path)
 
-        # Handle server shutdown signals
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(server.close()))
-        loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(server.close()))
+        # # Handle server shutdown signals
+        # loop = asyncio.get_running_loop()
+        # loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(server.close()))
+        # loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(server.close()))
 
-        logger.debug('Control server started...')
-        await server.serve_forever()
-
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
-        return asyncio.create_task(self.start_control_server())
+        # logger.debug('Control server started...')
+        # await server.serve_forever()
