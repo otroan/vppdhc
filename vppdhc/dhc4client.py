@@ -43,9 +43,14 @@ class DHCPClient:
 
     def client_set_state(self, newstate: DHCP4ClientStateMachine) -> None:
         """Set the client state."""
-        if self.event_queue:
-            self.event_queue.put_nowait(DHCP4ClientEvent(state=newstate))
+        # if self.event_queue:
+        #     self.event_queue.put_nowait(DHCP4ClientEvent(state=newstate))
         self.state = newstate
+
+    def send_event(self, prefix: IPv4Interface, options: dict) -> None:
+        """Send event."""
+        if self.event_queue:
+            self.event_queue.put_nowait(DHCP4ClientEvent(ip=prefix, state=self.state, options=options))
 
     async def client(self) -> None:
         """DHCPv4 Client."""
@@ -163,5 +168,10 @@ class DHCPClient:
                 server_mac = reply[Ether].src
                 rt = 0.5 * lease_time
                 prefix = IPv4Interface(f'{client_ip}/{options["subnet_mask"]}')
-                self.event_queue.put_nowait(DHCP4ClientEvent(ip=prefix))
                 self.client_set_state(DHCP4ClientStateMachine.BOUND)
+                self.send_event(prefix, options)
+            elif options["message-type"] == 6: # DHCPNAK
+                logger.error("Received DHCPNAK")
+                self.client_set_state(DHCP4ClientStateMachine.INIT)
+            else:
+                logger.error("Received unknown message type: %s", options["message-type"])

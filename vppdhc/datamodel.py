@@ -41,6 +41,7 @@ class DHCP4ClientEvent(BaseModel):
 
     ip: IPv4Interface = None
     state: DHCP4ClientStateMachine = None
+    options: dict = None
 
 class DHCP4ServerEvent(BaseModel):
     """DHCPv4 server event."""

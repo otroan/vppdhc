@@ -287,6 +287,7 @@ class DHCPv4BindingDatabase(BaseModel):
 
     def verify_or_extend_lease(self, client_id: bytes, reqip: IPv4Address) -> IPv4Address:
         """Verify or extend a lease."""
+        print('*** REQIP ***', reqip)
         index = get_ip_index(reqip, self.network)
         lease = self.leases[index]
 
@@ -317,7 +318,7 @@ class DHCPv4BindingDatabase(BaseModel):
         repb.sname = "vppdhcpd"         # Server name not given
         del repb.payload
         resp = (Ether(src=self.mac_address, dst=mac) /
-                IP(src=self.dhcp_server_ip, dst=dst_ip) /
+                IP(src=self.server_ip, dst=dst_ip) /
                 UDP(sport=req.dport, dport=req.sport) / repb)
 
         dhcp_options = [("message-type", "nak")]
@@ -392,8 +393,7 @@ class DHCPServer:
 
         client_id = b"0x1" + mac_address if client_id is None else client_id
 
-        if reqip:
-            reqip = IPv4Address(reqip)
+        reqip = IPv4Address(reqip) if reqip else req[IP].src
 
         if msgtype == 1: # discover
             # Reserve a new address
@@ -417,14 +417,15 @@ class DHCPServer:
                 ip = db.confirm_offer(client_id, reqip)
                 if not ip:
                     return db.nak("255.255.255.255", req)
-                logger.debug("CONFIRM: %s: %s", mac_address, ip)
+                logger.debug("REQUEST: %s: %s", mac_address, ip)
+                dst_ip = "255.255.255.255"
             else:
                 # Verifying or extending an existing lease
                 ip = db.verify_or_extend_lease(client_id, reqip)
                 if not ip:
                     return db.nak(ip, req)
-            logger.debug("REQUEST/RENEW: %s: %s", mac_address, ip)
-            dst_ip = ip
+                logger.debug("RENEW/REBIND: %s: %s", mac_address, ip)
+                dst_ip = ip
         elif msgtype == 4: # decline
             # Address declined, like duplicate
             db.decline(client_id, reqip)

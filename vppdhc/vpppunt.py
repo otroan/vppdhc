@@ -222,12 +222,12 @@ class VPP():
         )
         print(f'Tried to add an mreceive entry {rv}')
 
-    def vpp_dhcp_client_detect(self, ifindex, enable=True):
-        r = self.vpp.api.dhcp_client_detect_enable_disable(
-            sw_if_index=ifindex,
-            enable=enable,
-        )
-        assert r.retval == 0
+    # def vpp_dhcp_client_detect(self, ifindex, enable=True):
+    #     r = self.vpp.api.dhcp_client_detect_enable_disable(
+    #         sw_if_index=ifindex,
+    #         enable=enable,
+    #     )
+    #     assert r.retval == 0
 
     def vpp_ip_address(self, ifindex, prefix, add=True):
         r = self.vpp.api.sw_interface_add_del_address(
