@@ -43,8 +43,8 @@ class DHCPClient:
 
     def client_set_state(self, newstate: DHCP4ClientStateMachine) -> None:
         """Set the client state."""
-        # if self.event_queue:
-        #     self.event_queue.put_nowait(DHCP4ClientEvent(state=newstate))
+        if self.event_queue:
+            self.event_queue.put_nowait(DHCP4ClientEvent(state=newstate))
         self.state = newstate
 
     def send_event(self, prefix: IPv4Interface, options: dict) -> None:
