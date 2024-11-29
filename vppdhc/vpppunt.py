@@ -102,9 +102,19 @@ class VPP():
         logger.debug('Interface info: %s', interfaceinfo)
         return interfaceinfo
 
-    def vpp_probe_is_duplicate(self, ifindex, mac, neighbor):
-        '''Returns true if this is a likely duplciate'''
+    def vpp_probe_is_duplicate_async(self, ifindex, mac, neighbor) -> bool:
+        """Returns true if this is a likely duplicate."""
         rv = self.vpp.api.arping_acd(address=neighbor, sw_if_index=ifindex, is_garp=False)
+        if rv.retval != 0:
+            logger.error(f"Error arping_acd: {rv}")
+        if rv.reply_count > 0 and rv.mac_address != mac:
+            return True
+        return False
+
+    async def vpp_probe_is_duplicate(self, ifindex, mac, neighbor) -> bool:
+        """Returns true if this is a likely duplicate."""
+        loop = asyncio.get_event_loop()
+        rv = await loop.run_in_executor(None, self.vpp.api.arping_acd, neighbor, ifindex, False)
         if rv.retval != 0:
             logger.error(f"Error arping_acd: {rv}")
         if rv.reply_count > 0 and rv.mac_address != mac:

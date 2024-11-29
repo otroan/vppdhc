@@ -5,28 +5,23 @@
 # Clean up probed duplicates after timeout
 # Clean up expired leases
 
-import asyncio
 import hashlib
 import logging
+import time
 from asyncio import Task
-from datetime import datetime, timedelta
 from enum import Enum
 from ipaddress import IPv4Address, IPv4Network
 
-from typing import Optional, Union
-from pydantic import BaseModel, constr, conint, Field, ConfigDict
-
 import asyncio_dgram
+from pydantic import BaseModel, ConfigDict, conint, field_serializer
 from scapy.layers.dhcp import BOOTP, DHCP
 from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
-from scapy.utils import str2mac
 from scapy.packet import Packet
+from scapy.utils import str2mac
 
 from vppdhc.vppdhcdctl import register_command
 from vppdhc.vpppunt import Actions, VPPPunt
-
-from vppdhc.datamodel import DHCP4ServerEvent
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
@@ -44,28 +39,20 @@ def command_dhcp_binding(args=None) -> str:
         return f"Binding command with args: {args}"
     # Get DHCPServer singleton instance
 
-    dhcp = DHCPServer.get_instance()
+    dhcp = DHC4Server.get_instance()
     s = ""
-    for k,v in dhcp.bindings.items():
-        s += f"DHCPv4 Bindings interface: {k}\n"
-        s += v.dump()
+    for v in dhcp.dbs.values():
+        s += v.model_dump_json(indent=4, exclude_none=True)
     return s
 
-def options2dict(packet):
-    '''Get DHCP message type'''
+def options2dict(packet) -> dict:
+    """Get DHCP message type."""
     # Return all options in a dictionary
     # Using a dict comprehension
     options = {}
     for op in packet[DHCP].options:
         options[op[0]] = op[1]
     return options
-
-# def chaddr2str(v):
-#     '''Convert a chaddr to a string'''
-#     if v[6:] == b"\x00" * 10:  # Default padding
-#         return f"{str2mac(v[:6])} (+ 10 nul pad)"
-#     return f"{str2mac(v[:6])} (pad: {v[6:]})"
-
 
 def get_ip_index(ip: str, network: str) -> int:
     """Get the index of an IP address in a network."""
@@ -76,10 +63,12 @@ def get_ip_index(ip: str, network: str) -> int:
     if ip_address in network_address:
         # Calculate the index
         return int(ip_address) - int(network_address.network_address)
-    else:
-        raise ValueError("IP address is not in the specified network.")
+    raise ValueError
 
-class BindingState(Enum):
+def get_epoch() -> int:
+    """Get the current epoch time."""
+    return int(time.time())
+class DHC4BindingState(Enum):
     """State of the binding."""
 
     BOUND = "BOUND"
@@ -88,53 +77,63 @@ class BindingState(Enum):
     RESERVED = "RESERVED"
     OFFERED = "OFFERED"
 
-# class Chaddr():
-#     def __init__(self, chaddr):
-#         self.chaddr = chaddr
-
-class DHCPLease(BaseModel):
+class DHC4Lease(BaseModel):
     """DHCPv4 Lease information."""
 
     ip_address: IPv4Address  # The IPv4 address assigned to the client
     mac_address: bytes
-    hostname: Union[str, None]  # Hostname, if provided by the client
-    lease_start: datetime  # Timestamp for when the lease was first issued
-    lease_end: datetime  # Timestamp for when the lease will expire
-    lease_duration: timedelta  # Lease duration in seconds
-    status: BindingState
-    client_id: Union[bytes, None]  # DHCP client identifier (if used by the client)
-    renew_time: Union[datetime, None]  # Optional T1 renew time (RFC 2131)
-    rebind_time: Union[datetime, None]  # Optional T2 rebind time (RFC 2131)
+    hostname: str | None  # Hostname, if provided by the client
+    last_updated: int  # Timestamp for when the lease was first issued
+    status: DHC4BindingState
+    client_id: bytes | None # DHCP client identifier (if used by the client)
+
+    @field_serializer("mac_address")
+    def serialize_mac_address(self, value: bytes) -> str:
+        # Serialize `bytes` to Base64-encoded string
+        return str2mac(value)
+    @field_serializer("client_id")
+    def serialize_client_id(self, value: bytes) -> str:
+        # Serialize `bytes` to Base64-encoded string
+        if value is None:
+            return ""
+        return value.hex()
 
 class DHC4ServerNoIPaddrAvailableError(Exception):
     pass
 
-class DHCPv4BindingDatabase(BaseModel):
+class DHC4BindingDatabase(BaseModel):
     """DHCPv4 Binding database."""
+
     ifindex: int
     interface: str
     mac_address: bytes
     server_ip: IPv4Address
-    leases: list[Union[DHCPLease, None]]  # List of DHCP leases (each representing a client binding)
+    leases: list[DHC4Lease | None]  # List of DHCP leases (each representing a client binding)
     network: IPv4Network  # The network the DHCP server is serving, e.g., "192.168.1.0/24"
-    # gateway: Union[IPv4Address, None]  # Default gateway for the network
-    dns_servers: Union[list[IPv4Address], None]  # List of DNS servers provided by DHCP
+    dns_servers: list[IPv4Address] | None  # List of DNS servers provided by DHCP
     lease_time_default: conint(gt=0) = 86400  # Default lease time in seconds (e.g., 24 hours)
-    # last_updated: datetime  # Timestamp for the last update to the binding database
     lease_by_client_id: dict[bytes, int]  # Index of bindings by MAC address
     model_config = ConfigDict(extra="allow")
+
+    @field_serializer("mac_address")
+    def serialize_mac_address(self, value: bytes) -> str:
+        return str2mac(value)
+    @field_serializer("lease_by_client_id")
+    def serialize_lease_by_client_id(self, value: bytes) -> str:
+        return None
+    @field_serializer("leases")
+    def serialize_leases(self, value: list[IPv4Address]|None) -> str:
+        return [lease for lease in value if lease is not None]
 
     def static_ip(self, ip: IPv4Address) -> None:
         """Reserve an IP address."""
         index = get_ip_index(ip, self.network)
-        self.leases[index] = DHCPLease(
+        self.leases[index] = DHC4Lease(
             ip_address=ip,
             mac_address=b"",
             hostname=None,
-            lease_start=datetime.now(),
-            lease_end=datetime.now(),
-            lease_duration=0,
-            status=BindingState.RESERVED,
+            last_updated=0,
+            status=DHC4BindingState.RESERVED,
             client_id=None,
             renew_time=None,
             rebind_time=None,
@@ -144,7 +143,7 @@ class DHCPv4BindingDatabase(BaseModel):
         super().__init__(**data)
         self.__post_init__()
 
-    def __post_init__(self) -> "DHCPv4BindingDatabase":
+    def __post_init__(self) -> "DHC4BindingDatabase":
         """Post-init hook."""
         # Extend the list with None to accommodate the new index
         self.leases.extend([None] * (self.network.num_addresses))
@@ -182,15 +181,33 @@ class DHCPv4BindingDatabase(BaseModel):
                 if not self.in_use(ip) and ip not in self.probed_duplicates:
                     break
             else:
-                raise DHC4ServerNoIPaddrAvailableError("No free IP addresses available")
+                raise DHC4ServerNoIPaddrAvailableError
         logger.debug("Next free IP address: %s to %s", ip, client_id)
         return ip
 
     def in_use(self, ip) -> bool:
+        """Is the IP address in use."""
         try:
             index = get_ip_index(ip, self.network)
         except ValueError:
             return False
+        lease = self.leases[index]
+        if lease is None:
+            return False
+        if lease.status == DHC4BindingState.RESERVED or lease.last_updated == 0:
+            return True
+        if lease.last_updated + self.lease_time_default < get_epoch():
+            # Lease expired
+            logger.debug("Lease expired: %s", ip)
+            self.leases[index] = None
+            try:
+                del self.lease_by_client_id[lease.client_id]
+                del self.leases[index]
+            except KeyError:
+                pass
+            self.leases[index] = None
+            return False
+
         return self.leases[index] is not None
 
     def broadcast_address(self) -> IPv4Address:
@@ -204,21 +221,14 @@ class DHCPv4BindingDatabase(BaseModel):
 
     def reserve(self, mac_address: bytes , client_id: bytes, hostname: str, reqip=None) -> IPv4Address:
         """Reserve a new IP address."""
-        # if chaddr in self.bindings:
-        #     # Client already has an address. Renew
-        #     self.bindings[chaddr].refreshed = datetime.now()
-        #     return self.bindings[chaddr].ip, True
-
         ip = self.get_next_free(client_id, reqip)
 
-        lease = DHCPLease(
+        lease = DHC4Lease(
             ip_address=ip,
             mac_address=mac_address,
             hostname=hostname,
-            lease_start=datetime.now(),
-            lease_end=datetime.now(),
-            lease_duration=0,
-            status=BindingState.OFFERED,
+            last_updated=get_epoch(),
+            status=DHC4BindingState.OFFERED,
             client_id=client_id,
             renew_time=None,
             rebind_time=None,
@@ -232,17 +242,18 @@ class DHCPv4BindingDatabase(BaseModel):
 
         return ip
 
-    def reserve_with_probe(self, vpp, mac_address, clientid, hostname) -> IPv4Address:
+    async def reserve_with_probe(self, vpp, mac_address, clientid, hostname) -> IPv4Address:
         """Reserve an IP address with probe (OFFER)."""
         while True:
             ip = self.reserve(mac_address, clientid, hostname)
 
             logger.debug("Probing address: %s", ip)
-            if not vpp.vpp_probe_is_duplicate(self.ifindex, clientid, ip):
+            r = await vpp.vpp_probe_is_duplicate_async(self.ifindex, clientid, ip)
+            if not r:
                 break
 
             logger.error("***Already in use: %s %s", ip, clientid)
-            self.probed_duplicates[ip] = datetime.now()
+            self.probed_duplicates[ip] = get_epoch()
         return ip
 
     def release(self, client_id: bytes, ip: IPv4Address) -> None:
@@ -267,7 +278,7 @@ class DHCPv4BindingDatabase(BaseModel):
         logger.error("Releasing IP address: %s from %s", ip, client_id)
         del self.lease_by_client_id[client_id]
         del self.leases[index]
-        self.probed_duplicates[ip] = datetime.now()
+        self.probed_duplicates[ip] = get_epoch()
 
     def confirm_offer(self, client_id: bytes, ip: IPv4Address) -> IPv4Address:
         """Confirm an offer."""
@@ -280,9 +291,8 @@ class DHCPv4BindingDatabase(BaseModel):
         if ip != lease.ip_address:
             logger.error("Confirm offer with wrong ip address %s != %s", ip, lease.ip_address)
             return None
-        lease.status = BindingState.BOUND
-        lease.lease_start = datetime.now()
-        lease.lease_end = lease.lease_start + lease.lease_duration
+        lease.status = DHC4BindingState.BOUND
+        lease.last_updated = get_epoch()
         return lease.ip_address
 
     def verify_or_extend_lease(self, client_id: bytes, reqip: IPv4Address) -> IPv4Address:
@@ -294,16 +304,8 @@ class DHCPv4BindingDatabase(BaseModel):
         if lease.ip_address != reqip or lease.client_id != client_id:
             logger.error("Verify or extend lease with wrong IP %s != %s", lease.ip_address, reqip)
             return None
-        lease.lease_start = datetime.now()
-        lease.lease_end = lease.lease_start + lease.lease_duration
+        lease.last_updated = get_epoch()
         return lease.ip_address
-
-    def dump(self)-> str:
-        """Dump the bindings."""
-        s = f"Bindings for {self.prefix}\n"
-        for k,v in self.bindings.items():
-            s += f'{k}: {v["ip"]} {v["state"]} {str(v["created"])}\n'
-        return s
 
     def nak(self, dst_ip, req):
         """Create a NAK packet."""
@@ -332,18 +334,18 @@ class DHCPv4BindingDatabase(BaseModel):
         del self.leases[index]
 
 
-class DHCPServer:
+class DHC4Server:
     """DHCPv4 Server. Singleton class."""
 
     _instance = None
 
-    def __new__(cls, *args, **kwargs) -> "DHCPServer":
+    def __new__(cls, *args, **kwargs) -> "DHC4Server":
         """DHCPv4 Server."""
         if not cls._instance:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, receive_socket, send_socket, vpp, conf, event_queue: asyncio.Queue) -> None:
+    def __init__(self, receive_socket, send_socket, vpp, conf) -> None:
         """DHCPv4 Server."""
         self.receive_socket = receive_socket
         self.send_socket = send_socket
@@ -356,7 +358,6 @@ class DHCPServer:
         self.ipv6_only_preferred = conf.ipv6_only_preferred
 
         self.dbs = {}   # DHCPv4 Binding databases
-        self.event_queue = event_queue
 
         # Clients send from their unicast address to 255.255.255.255:67
         self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, "255.255.255.255", 17, 0, 67)
@@ -369,7 +370,7 @@ class DHCPServer:
         return cls._instance
 
 
-    def process_packet(self, db: DHCPv4BindingDatabase, req: Packet): # pylint: disable=too-many-locals
+    async def process_packet(self, db: DHC4BindingDatabase, req: Packet): # pylint: disable=too-many-locals
         """Process a DHCP packet."""
         dhcp_server_ip = db.server_ip
 
@@ -399,7 +400,7 @@ class DHCPServer:
             # Reserve a new address
             dst_ip = "255.255.255.255"
             try:
-                ip = db.reserve_with_probe(self.vpp, mac_address, client_id, hostname)
+                ip = await db.reserve_with_probe(self.vpp, mac_address, client_id, hostname)
                 logger.debug("DISCOVER: %s: %s", mac_address, ip)
             except DHC4ServerNoIPaddrAvailableError:
                 logger.exception("*** ERROR No IP address available for: %s ***", mac_address)
@@ -509,7 +510,7 @@ class DHCPServer:
                 interface_info = self.vpp.vpp_interface_info(ifindex)
 
                 # Create a new DHCPv4 pool based on the interface IP address/subnet
-                db = self.dbs[ifindex] = DHCPv4BindingDatabase(ifindex=ifindex,
+                db = self.dbs[ifindex] = DHC4BindingDatabase(ifindex=ifindex,
                                                                interface=interface_info.name,
                                                                mac_address=interface_info.mac,
                                                                server_ip=interface_info.ip4[0].ip,
@@ -518,12 +519,11 @@ class DHCPServer:
                                                                dns_servers=self.name_server,
                                                                lease_by_client_id={},
                                                                )
-                self.event_queue.put_nowait(DHCP4ServerEvent(event="New database created"))
 
                 # Add a 3-tuple session so to get DHCP unicast packets
                 self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
 
-            reply = self.process_packet(db, packet)
+            reply = await self.process_packet(db, packet)
             if not reply:
                 logger.notice("Process packet failed. No reply")
                 continue
@@ -532,7 +532,3 @@ class DHCPServer:
             packet_logger.debug("Sending to %s: %s", interface_info.mac, reply.show2(dump=True))
 
             await writer.send(bytes(reply))
-
-    def __call__(self) -> Task:
-        """Plugin entry point."""
-        return asyncio.create_task(self.listen())

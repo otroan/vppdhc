@@ -11,8 +11,9 @@ from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
 from scapy.volatile import RandInt
 
-from vppdhc.datamodel import DHCP4ClientEvent, DHCP4ClientStateMachine, IPv4Interface
+from vppdhc.datamodel import DHC4ClientEvent, DHC4ClientStateMachine, IPv4Interface
 from vppdhc.vpppunt import Actions, VPPPunt
+from vppdhc.event_manager import EventManager
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
@@ -28,29 +29,30 @@ def options2dict(options: list) -> dict:
     for op in options:
         o[op[0]] = op[1]
     return o
-class DHCPClient:
+class DHC4Client:
     """DHCPv4 Client."""
 
-    def __init__(self, receive_socket, send_socket, vpp, conf, event_queue: asyncio.Queue) -> None:
+    def __init__(self, receive_socket, send_socket, vpp, conf, event_manager: EventManager) -> None:
         """DHCPv4 Client."""
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
         self.if_name = conf.interface
         self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
-        self.event_queue = event_queue
-        self.client_set_state(DHCP4ClientStateMachine.INIT)
+        self.event_manager = event_manager
+        self.state = DHC4ClientStateMachine.INIT
 
-    def client_set_state(self, newstate: DHCP4ClientStateMachine) -> None:
+    async def client_set_state(self, newstate: DHC4ClientStateMachine) -> None:
         """Set the client state."""
-        if self.event_queue:
-            self.event_queue.put_nowait(DHCP4ClientEvent(state=newstate))
+        if self.event_manager:
+            await self.event_manager.publish("/dhc4client/state", DHC4ClientEvent(state=newstate))
         self.state = newstate
 
-    def send_event(self, prefix: IPv4Interface, options: dict) -> None:
+    async def on_lease(self, prefix: IPv4Interface, options: dict) -> None:
         """Send event."""
-        if self.event_queue:
-            self.event_queue.put_nowait(DHCP4ClientEvent(ip=prefix, state=self.state, options=options))
+        if self.event_manager:
+            await self.event_manager.publish("/dhc4client/on_lease",
+                                       DHC4ClientEvent(ip=prefix, state=self.state, options=options))
 
     async def client(self) -> None:
         """DHCPv4 Client."""
@@ -71,7 +73,7 @@ class DHCPClient:
         server_mac = None
 
         while True:
-            if self.state == DHCP4ClientStateMachine.INIT:
+            if self.state == DHC4ClientStateMachine.INIT:
                 # Send DHCPDISCOVER
                 discover = (Ether(src=interface_info.mac, dst="ff:ff:ff:ff:ff:ff") /
                             IP(src="0.0.0.0", dst="255.255.255.255") /  # noqa: S104
@@ -88,7 +90,7 @@ class DHCPClient:
 
                 rt = 2*rt + random.uniform(-0.1, 0.1)*rt
                 rt = min(rt, 3600) # MAX_SOL_TIMEOUT
-            elif self.state == DHCP4ClientStateMachine.REQUESTING:
+            elif self.state == DHC4ClientStateMachine.REQUESTING:
                 requested_addr = reply[BOOTP].yiaddr
                 dhcp_options = [("message-type", "request"),
                                 ("server_id", server_id),
@@ -113,9 +115,9 @@ class DHCPClient:
                 rt = 2*rt + random.uniform(-0.1, 0.1)*rt  # noqa: S311
                 rt = min(rt, 30) # REQ_MAX_RT
                 if rc > 10:
-                    self.client_set_state(DHCP4ClientStateMachine.INIT)
+                    await self.client_set_state(DHC4ClientStateMachine.INIT)
                     logger.warning("REQUEST timeout")
-            elif self.state == DHCP4ClientStateMachine.RENEWING:
+            elif self.state == DHC4ClientStateMachine.RENEWING:
                 # Renew lease
                 dhcp_options = [("message-type", "request"),
                                 ("client_id", b"\x01" + chaddr), "end"
@@ -137,15 +139,15 @@ class DHCPClient:
                 rt = 2*rt + random.uniform(-0.1, 0.1)*rt
                 rt = min(rt, 30) # REQ_MAX_RT
                 if rc > 10:
-                    self.client_set_state(DHCP4ClientStateMachine.INIT)
+                    await self.client_set_state(DHC4ClientStateMachine.INIT)
                     logger.warning("REQUEST timeout")
 
             # Receive on uds socket
             try:
                 reply, _ = await asyncio.wait_for(reader.recv(), timeout=rt)
-            except asyncio.TimeoutError:
-                if self.state == DHCP4ClientStateMachine.BOUND:
-                    self.client_set_state(DHCP4ClientStateMachine.RENEWING)
+            except TimeoutError:
+                if self.state == DHC4ClientStateMachine.BOUND:
+                    await self.client_set_state(DHC4ClientStateMachine.RENEWING)
                 logger.warning("Timeout")
                 continue
 
@@ -158,7 +160,7 @@ class DHCPClient:
             server_id = options.get("server_id", None)
             if options["message-type"] == 2:    # DHCPOFFER
                 logger.debug("Received DHCPOFFER")
-                self.client_set_state(DHCP4ClientStateMachine.REQUESTING)
+                await self.client_set_state(DHC4ClientStateMachine.REQUESTING)
                 rc = 0
             elif options["message-type"] == 5: # DHCPACK
                 logger.debug("Received DHCPACK")
@@ -168,10 +170,10 @@ class DHCPClient:
                 server_mac = reply[Ether].src
                 rt = 0.5 * lease_time
                 prefix = IPv4Interface(f'{client_ip}/{options["subnet_mask"]}')
-                self.client_set_state(DHCP4ClientStateMachine.BOUND)
-                self.send_event(prefix, options)
+                await self.client_set_state(DHC4ClientStateMachine.BOUND)
+                await self.on_lease(prefix, options)
             elif options["message-type"] == 6: # DHCPNAK
                 logger.error("Received DHCPNAK")
-                self.client_set_state(DHCP4ClientStateMachine.INIT)
+                await self.client_set_state(DHC4ClientStateMachine.INIT)
             else:
                 logger.error("Received unknown message type: %s", options["message-type"])

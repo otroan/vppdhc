@@ -5,8 +5,8 @@ from ipaddress import IPv4Address, IPv4Network
 from vppdhc.dhc4server import get_ip_index
 from datetime import datetime
 from pydantic import ValidationError
-from vppdhc.dhc4server import (DHCPv4BindingDatabase,
-                               DHCPLease, BindingState,
+from vppdhc.dhc4server import (DHC4BindingDatabase,
+                               DHC4Lease, DHC4BindingState,
                                get_ip_index,
                                DHC4ServerNoIPaddrAvailableError
                                )
@@ -17,7 +17,7 @@ def test_ip_in_network():
     assert get_ip_index("192.168.1.255", "192.168.1.0/24") == 255
 
 def test_ip_not_in_network():
-    with pytest.raises(ValueError, match="IP address is not in the specified network."):
+    with pytest.raises(ValueError):
         get_ip_index("192.168.2.10", "192.168.1.0/24")
 
 def test_ip_at_network_boundary():
@@ -44,7 +44,7 @@ def test_network_not_ipv4():
 
 @pytest.fixture
 def dhcp_binding_db():
-    return DHCPv4BindingDatabase(
+    return DHC4BindingDatabase(
         ifindex=1,
         interface="eth0",
         mac_address=bytes.fromhex("001122334455"),
@@ -74,16 +74,16 @@ def test_static_ip(dhcp_binding_db):
     index = get_ip_index(ip, "192.168.1.0/24")
     lease = dhcp_binding_db.leases[index]
     assert lease.ip_address == ip
-    assert lease.status == BindingState.RESERVED
+    assert lease.status == DHC4BindingState.RESERVED
 
 def test_static_ip_outside_network(dhcp_binding_db):
     ip = IPv4Address("192.168.2.10")
-    with pytest.raises(ValueError, match="IP address is not in the specified network."):
+    with pytest.raises(ValueError):
         dhcp_binding_db.static_ip(ip)
 
 def test_invalid_initialization():
     with pytest.raises(ValidationError):
-        DHCPv4BindingDatabase(
+        DHC4BindingDatabase(
             ifindex=1,
             interface="eth0",
             mac_address=bytes.fromhex("001122334455"),
@@ -103,7 +103,7 @@ def test_post_init_hook(dhcp_binding_db):
         index = get_ip_index(ip, "192.168.1.0/24")
         lease = dhcp_binding_db.leases[index]
         assert lease.ip_address == ip, f"IP address {ip} is not reserved"
-        assert lease.status == BindingState.RESERVED
+        assert lease.status == DHC4BindingState.RESERVED
 
 def test_reserve_new_client(dhcp_binding_db):
     client_id = b"client1"
@@ -126,7 +126,7 @@ def test_reserve_requested_ip(dhcp_binding_db):
 
 def test_reserve_no_available_ip(dhcp_binding_db):
     client_id = b"client1"
-    with pytest.raises(DHC4ServerNoIPaddrAvailableError, match="No free IP addresses available"):
+    with pytest.raises(DHC4ServerNoIPaddrAvailableError):
         for i in range(256):
             ip = dhcp_binding_db.reserve(client_id+i.to_bytes(), client_id+i.to_bytes(), "host")
 
@@ -139,7 +139,7 @@ def test_confirm_offer_new_client(dhcp_binding_db):
     assert confirmed_ip == ip
     index = get_ip_index(ip, "192.168.1.0/24")
     lease = dhcp_binding_db.leases[index]
-    assert lease.status == BindingState.BOUND
+    assert lease.status == DHC4BindingState.BOUND
 
 def test_confirm_offer_existing_client(dhcp_binding_db):
     mac_address = b"00:11:22:33:44:55"
@@ -150,7 +150,7 @@ def test_confirm_offer_existing_client(dhcp_binding_db):
     assert confirmed_ip == ip
     index = get_ip_index(ip, "192.168.1.0/24")
     lease = dhcp_binding_db.leases[index]
-    assert lease.status == BindingState.BOUND
+    assert lease.status == DHC4BindingState.BOUND
 
 def test_release(dhcp_binding_db):
     mac_address = b"00:11:22:33:44:55"

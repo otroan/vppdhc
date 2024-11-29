@@ -1,9 +1,10 @@
 """VPPDHC Configuration Model."""
 
 from enum import IntEnum
-from vpp_papi.macaddress import MACAddress
+
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic.networks import IPv4Address, IPv4Interface, IPv6Address, IPv6Network
+from pydantic.networks import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface, IPv6Network
+from vpp_papi.macaddress import MACAddress # type: ignore
 
 
 class VPPInterfaceInfo(BaseModel):
@@ -21,12 +22,12 @@ class ConfVPP(BaseModel):
 
     socket: str
 
-class ConfDHCP4Client(BaseModel):
+class ConfDHC4Client(BaseModel):
     """DHCPv4 client configuration."""
 
     interface: str
 
-class DHCP4ClientStateMachine(IntEnum):
+class DHC4ClientStateMachine(IntEnum):
     """DHCPv4 Client states."""
 
     INIT = 0
@@ -36,19 +37,14 @@ class DHCP4ClientStateMachine(IntEnum):
     RENEWING = 4
     RELEASING = 5
 
-class DHCP4ClientEvent(BaseModel):
+class DHC4ClientEvent(BaseModel):
     """DHCPv4 client event."""
 
     ip: IPv4Interface = None
-    state: DHCP4ClientStateMachine = None
+    state: DHC4ClientStateMachine = None
     options: dict = None
 
-class DHCP4ServerEvent(BaseModel):
-    """DHCPv4 server event."""
-
-    event: str
-
-class ConfDHCP4Server(BaseModel):
+class ConfDHC4Server(BaseModel):
     """DHCPv4 server configuration."""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -58,20 +54,28 @@ class ConfDHCP4Server(BaseModel):
     ipv6_only_preferred: bool = Field(alias="ipv6-only-preferred", default=False)
     bypass_tenant: int = Field(alias="bypass-tenant")
 
-class ConfDHCP6PDClient(BaseModel):
+class ConfDHC6Client(BaseModel):
     """DHCPv6 PD client configuration."""
 
+    model_config = ConfigDict(populate_by_name=True)
     interface: str
-    internal_prefix: IPv6Network = Field(alias="internal-prefix")
-    npt66: bool = False
+    ia_pd: bool = True
+    ia_na: bool = False
 
-class ConfDHCP6Server(BaseModel):
+
+    internal_prefix: IPv6Network = Field(alias="internal-prefix") # Move to "business logic"
+    npt66: bool = False # Move to "business logic"
+
+class ConfDHC6Server(BaseModel):
     """DHCPv6 server configuration."""
 
     interfaces: list[str]
     preflft: int = 604800
     validlft: int = 2592000
     dns: list[IPv6Address]
+    ia_na: bool = True
+    ia_prefix: list[IPv6Network] | None = None
+    ia_allocate_length: int | None = None
 
 class ConfIP6NDPrefix(BaseModel):
     """IPv6 ND prefix information."""
@@ -79,6 +83,7 @@ class ConfIP6NDPrefix(BaseModel):
     prefix: IPv6Network
     L: bool = True
     A: bool = False
+
 class ConfIP6NDRA(BaseModel):
     """IPv6 ND RA configuration."""
 
@@ -91,10 +96,45 @@ class Configuration(BaseModel):
     """Configuration model."""
 
     vpp: ConfVPP = None
-    dhc4client: ConfDHCP4Client = None
-    dhc4server: ConfDHCP4Server = None
-    dhc6pdclient: ConfDHCP6PDClient = None
-    dhc6server: ConfDHCP6Server = None
+    dhc4client: ConfDHC4Client = None
+    dhc4server: ConfDHC4Server = None
+    dhc6client: ConfDHC6Client = None
+    dhc6server: ConfDHC6Server = None
     ip6ndra: ConfIP6NDRA = None
 
 
+class DHC6_IAAddr(BaseModel):
+    """OPTION_IAADDR."""
+
+    address: IPv6Address
+    preferred: int
+    valid: int
+
+class DHC6_IANA(BaseModel):
+    """OPTION_IA_NA."""
+
+    iaid: int
+    T1: int
+    T2: int
+    addresses: list[DHC6_IAAddr]
+
+class DHC6_IAPrefix(BaseModel):
+    """OPTION_IAPREFIX."""
+
+    prefix: IPv6Network
+    preferred: int
+    valid: int
+class DHC6_IAPD(BaseModel):
+    """OPTION_IA_PD."""
+
+    iaid: int
+    T1: int
+    T2: int
+    prefixes: list[DHC6_IAPrefix]
+class DHC6ClientBinding(BaseModel):
+    """DHCPv6 client binding."""
+
+    ia_pd: list[DHC6_IAPD]|None
+    ia_na: list[DHC6_IANA]|None
+    macsrc: bytes
+    nexthop: IPv6Address

@@ -13,14 +13,15 @@ import typer
 
 from vppdhc._version import __version__
 
-from vppdhc.dhc4client import DHCPClient
-from vppdhc.dhc4server import DHCPServer
-from vppdhc.dhc6pdclient import DHCPv6PDClient
-from vppdhc.dhc6server import DHCPv6Server
+from vppdhc.dhc4client import DHCClient
+from vppdhc.dhc4server import DHCServer
+from vppdhc.dhc6client import DHC6Client
+from vppdhc.dhc6server import DHC6Server
 from vppdhc.raadv import IP6NDRA
 from vppdhc.vppdhcdctl import VPPDHCD
 from vppdhc.vpppunt import VPP, VppEnum
-from vppdhc.datamodel import DHCP4ClientEvent, DHCP4ServerEvent, Configuration
+from vppdhc.datamodel import DHC4ClientEvent, DHC4ServerEvent, Configuration
+import vppdhc.businesslogic
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def version_callback(value: bool):
         typer.echo(f"vppdhcpd version: {__version__}")
         raise typer.Exit()
 
-def setup_tasks(tg, conf, vpp, event_queue: asyncio.Queue):
+def setup_tasks(tg, conf, vpp):
     """Setup the tasks."""
     tasks = []
     # Initialise the control socket
@@ -50,7 +51,7 @@ def setup_tasks(tg, conf, vpp, event_queue: asyncio.Queue):
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 68)
 
-        dhcp_client = DHCPClient(socket, vpp_socket, vpp, conf.dhc4client, event_queue)
+        dhcp_client = DHCPClient(socket, vpp_socket, vpp, conf.dhc4client)
         t = tg.create_task(dhcp_client.client())
         tasks.append(t)
 
@@ -66,13 +67,13 @@ def setup_tasks(tg, conf, vpp, event_queue: asyncio.Queue):
         tasks.append(t)
 
     # DHCPv6 PD client
-    if conf.dhc6pdclient:
+    if conf.dhc6client:
         logger.debug("Setting up DHCPv6 PD client")
         socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
                                 VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
                                 546) # pylint: disable=no-member
 
-        pd_client = DHCPv6PDClient(socket, vpp_socket, vpp, conf.dhc6pdclient)
+        pd_client = DHCPv6Client(socket, vpp_socket, vpp, conf.dhc6client)
         t = tg.create_task(pd_client())
         tasks.append(t)
 
@@ -103,7 +104,7 @@ def setup_tasks(tg, conf, vpp, event_queue: asyncio.Queue):
 
     return tasks
 
-def dhcp4clientevent(event):
+def dhc4clientevent(event):
     print('RECEIVED AN EVENT', event)
     # rv = self.vpp.vpp_ip_address(self.if_index, prefix)
     # print('RV', rv)
@@ -126,11 +127,11 @@ async def handle_events(event_queue: asyncio.Queue):
 
 async def main_coroutine(validatedconf, vpp) -> None:
     import traceback
-    event_queue = asyncio.Queue()
+    # event_queue = asyncio.Queue()
     try:
         async with asyncio.TaskGroup() as tg:
-            tasks = setup_tasks(tg, validatedconf, vpp, event_queue)
-            events = tg.create_task(handle_events(event_queue))
+            tasks = setup_tasks(tg, validatedconf, vpp)
+            # events = tg.create_task(handle_events(event_queue))
     except ExceptionGroup as eg:
         print(f"ExceptionGroup caught: {eg}")
         for exc in eg.exceptions:
@@ -162,7 +163,7 @@ def main(config: typer.FileText,
     packetloglevel = logging.DEBUG if logpacket else logging.INFO
     logging.getLogger("vppdhc.dhc4client.packet").setLevel(packetloglevel)
     logging.getLogger("vppdhc.dhc4server.packet").setLevel(packetloglevel)
-    logging.getLogger("vppdhc.dhc6pdclient.packet").setLevel(packetloglevel)
+    logging.getLogger("vppdhc.dhc6client.packet").setLevel(packetloglevel)
     logging.getLogger("vppdhc.dhc6server.packet").setLevel(packetloglevel)
     logging.getLogger("vppdhc.raadv.packet").setLevel(packetloglevel)
 
