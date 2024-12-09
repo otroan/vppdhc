@@ -359,10 +359,6 @@ class DHC4Server:
 
         self.dbs = {}   # DHCPv4 Binding databases
 
-        # Clients send from their unicast address to 255.255.255.255:67
-        self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, "255.255.255.255", 17, 0, 67)
-
-
     @classmethod
     def get_instance(cls, *args, **kwargs):
         if not cls._instance:
@@ -484,6 +480,9 @@ class DHC4Server:
 
     async def listen(self) -> None:
         """Listen for DHCP requests."""
+        # Clients send from their unicast address to 255.255.255.255:67
+        await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, "255.255.255.255", 17, 0, 67)
+
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
 
@@ -507,7 +506,7 @@ class DHC4Server:
             db = self.dbs.get(ifindex)
             if db is None:
                 # Create a pool on a given interface
-                interface_info = self.vpp.vpp_interface_info(ifindex)
+                interface_info = await self.vpp.vpp_interface_info(ifindex)
 
                 # Create a new DHCPv4 pool based on the interface IP address/subnet
                 db = self.dbs[ifindex] = DHC4BindingDatabase(ifindex=ifindex,
@@ -521,7 +520,7 @@ class DHC4Server:
                                                                )
 
                 # Add a 3-tuple session so to get DHCP unicast packets
-                self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
+                await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
 
             reply = await self.process_packet(db, packet)
             if not reply:

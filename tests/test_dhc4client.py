@@ -62,8 +62,9 @@ async def test_dhc4client() -> None:
                                     bypass_tenant=2000)
 
     vpp = Mock()
-    vpp.vpp_interface_name2index = MagicMock(return_value=42)
+    vpp.vpp_interface_name2index = AsyncMock(return_value=42)
     vpp.vpp_probe_is_duplicate_async = AsyncMock(return_value=False)
+    vpp.vpp_vcdp_session_add = AsyncMock(return_value=0)
     interfaceinfo =  VPPInterfaceInfo(ifindex=42,
                                       name="eth0",
                                       mac=b"\xaa\xbb\xcc\xdd\xee\xff",
@@ -73,7 +74,7 @@ async def test_dhc4client() -> None:
 
     logging.getLogger("vppdhc.dhc4client.packet").setLevel(logging.INFO)
 
-    vpp.vpp_interface_info = MagicMock(return_value=interfaceinfo)
+    vpp.vpp_interface_info = AsyncMock(return_value=interfaceinfo)
 
     client = DHC4Client(client_socket_path, server_socket_path, vpp, client_config, event_manager)
     server = DHC4Server(server_socket_path, client_socket_path, vpp, server_config)

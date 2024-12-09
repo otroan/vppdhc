@@ -64,8 +64,10 @@ async def test_dhc6client() -> None:
     )
 
     vpp = Mock()
-    vpp.vpp_interface_name2index = MagicMock(return_value=42)
-    vpp.vpp_probe_is_duplicate_async = AsyncMock(return_value=False)
+    vpp.vpp_interface_name2index = AsyncMock(return_value=42)
+    vpp.vpp_probe_is_duplicate = AsyncMock(return_value=False)
+    vpp.vpp_ip_multicast_group_join = AsyncMock(return_value=None)
+
     interfaceinfo = VPPInterfaceInfo(
         ifindex=42,
         name="eth0",
@@ -77,7 +79,7 @@ async def test_dhc6client() -> None:
 
     logging.getLogger("vppdhc.dhc6client.packet").setLevel(logging.INFO)
 
-    vpp.vpp_interface_info = MagicMock(return_value=interfaceinfo)
+    vpp.vpp_interface_info = AsyncMock(return_value=interfaceinfo)
 
     client = DHC6Client(client_socket_path, server_socket_path, vpp, client_config, event_manager)
     server = DHC6Server(server_socket_path, client_socket_path, vpp, server_config)

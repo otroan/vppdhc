@@ -38,7 +38,6 @@ class DHC4Client:
         self.send_socket = send_socket
         self.vpp = vpp
         self.if_name = conf.interface
-        self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
         self.event_manager = event_manager
         self.state = DHC4ClientStateMachine.INIT
 
@@ -56,7 +55,8 @@ class DHC4Client:
 
     async def client(self) -> None:
         """DHCPv4 Client."""
-        interface_info = self.vpp.vpp_interface_info(self.if_index)
+        self.if_index = await self.vpp.vpp_interface_name2index(self.if_name)
+        interface_info = await self.vpp.vpp_interface_info(self.if_index)
         logger.debug("Interface info: %s", interface_info)
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)

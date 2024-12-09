@@ -61,8 +61,6 @@ class DHC6Client:
         self.vpp = vpp
         self.if_name = conf.interface
         self.npt66 = conf.npt66
-        self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
-        logger.debug("Getting interface index for: %s %s", self.if_name, self.if_index)
         self.internal_prefix = conf.internal_prefix
         self.ia_pd = conf.ia_pd
         self.ia_na = conf.ia_na
@@ -127,7 +125,10 @@ class DHC6Client:
 
     async def client(self):
         """DHCPv6 Client."""
-        interface_info = self.vpp.vpp_interface_info(self.if_index)
+        self.if_index = await self.vpp.vpp_interface_name2index(self.if_name)
+        logger.debug("Getting interface index for: %s %s", self.if_name, self.if_index)
+
+        interface_info = await self.vpp.vpp_interface_info(self.if_index)
         logger.debug("Interface info: %s", interface_info)
 
         # Create a DUID-LL with the MAC address

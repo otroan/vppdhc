@@ -12,16 +12,14 @@ import sys
 import typer
 
 from vppdhc._version import __version__
-
-from vppdhc.dhc4client import DHCClient
-from vppdhc.dhc4server import DHCServer
+from vppdhc.datamodel import Configuration
+from vppdhc.dhc4client import DHC4Client
+from vppdhc.dhc4server import DHC4Server
 from vppdhc.dhc6client import DHC6Client
 from vppdhc.dhc6server import DHC6Server
 from vppdhc.raadv import IP6NDRA
 from vppdhc.vppdhcdctl import VPPDHCD
 from vppdhc.vpppunt import VPP, VppEnum
-from vppdhc.datamodel import DHC4ClientEvent, DHC4ServerEvent, Configuration
-import vppdhc.businesslogic
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)
@@ -31,107 +29,89 @@ def version_callback(value: bool):
     """Print the version and exit."""
     if value:
         typer.echo(f"vppdhcpd version: {__version__}")
-        raise typer.Exit()
+        raise typer.Exit
 
-def setup_tasks(tg, conf, vpp):
-    """Setup the tasks."""
+
+def setup_tasks(tg, conf, vpp) -> list:
+    """Set up the tasks."""
     tasks = []
     # Initialise the control socket
     try:
         vppdhcdctl = VPPDHCD("/tmp/vppdhcd.sock")
+        logger.debug("Starting VPPDHC Control server")
+
         t = tg.create_task(vppdhcdctl.start_control_server())
         tasks.append(t)
     except Exception as e:
-        logger.error(f"***Error setting up control socket: {e}")
+        logger.exception("***Error setting up control socket: %s", e)
 
     # DHCPv4 client
     if conf.dhc4client:
-        logger.debug("Setting up DHCPv4 client")
-        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
-                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
-                                68)
+        logger.debug("Starting DHCPv4 client")
+        socket, vpp_socket = vpp.vpp_socket_register(
+            VppEnum.vl_api_address_family_t.ADDRESS_IP4, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 68
+        )
 
-        dhcp_client = DHCPClient(socket, vpp_socket, vpp, conf.dhc4client)
-        t = tg.create_task(dhcp_client.client())
+        dhc4_client = DHC4Client(socket, vpp_socket, vpp, conf.dhc4client)
+        t = tg.create_task(dhc4_client.client())
         tasks.append(t)
 
     # DHCPv4 server
     if conf.dhc4server:
-        logger.debug("Setting up DHCPv4 server")
-        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP4,
-                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
-                                67)
+        logger.debug("Starting DHCPv4 server")
+        socket, vpp_socket = vpp.vpp_socket_register(
+            VppEnum.vl_api_address_family_t.ADDRESS_IP4, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 67
+        )
 
-        dhcp_server = DHCPServer(socket, vpp_socket, vpp, conf.dhc4server)
-        t = tg.create_task(dhcp_server())
+        dhc4_server = DHC4Server(socket, vpp_socket, vpp, conf.dhc4server)
+        t = tg.create_task(dhc4_server.listen())
         tasks.append(t)
 
-    # DHCPv6 PD client
+    # DHCPv6 client
     if conf.dhc6client:
-        logger.debug("Setting up DHCPv6 PD client")
-        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
-                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
-                                546) # pylint: disable=no-member
+        logger.debug("Starting DHCPv6 client")
+        socket, vpp_socket = vpp.vpp_socket_register(
+            VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 546
+        )  # pylint: disable=no-member
 
-        pd_client = DHCPv6Client(socket, vpp_socket, vpp, conf.dhc6client)
-        t = tg.create_task(pd_client())
+        dhc6_client = DHC6Client(socket, vpp_socket, vpp, conf.dhc6client)
+        t = tg.create_task(dhc6_client.client())
         tasks.append(t)
 
     # DHCPv6 server
     if conf.dhc6server:
-        logger.debug("Setting up DHCPv6 server")
-        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
-                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
-                                547) # pylint: disable=no-member
+        logger.debug("Starting DHCPv6 server")
+        socket, vpp_socket = vpp.vpp_socket_register(
+            VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 547
+        )  # pylint: disable=no-member
         try:
-            server = DHCPv6Server(socket, vpp_socket, vpp, conf.dhc6server)
+            dhc6_server = DHC6Server(socket, vpp_socket, vpp, conf.dhc6server)
         except Exception as e:
-            logger.error(f"Error setting up DHCPv6 server: {e}")
+            logger.exception("Error setting up DHCPv6 server: %s", e)
             sys.exit(1)
-        t = tg.create_task(server())
+        t = tg.create_task(dhc6_server.listen())
         tasks.append(t)
 
     # RA advertisement
     if conf.ip6ndra:
-        logger.debug("Setting up RA advertisement daemon")
+        logger.debug("Starting RA advertisement daemon")
         # Get router solicitations
-        socket, vpp_socket = vpp.vpp_socket_register(VppEnum.vl_api_address_family_t.ADDRESS_IP6,
-                                VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6,
-                                133) # pylint: disable=no-member
-        server = IP6NDRA(socket, vpp_socket, vpp, conf.ip6ndra)
-        t = tg.create_task(server())
+        socket, vpp_socket = vpp.vpp_socket_register(
+            VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6, 133
+        )  # pylint: disable=no-member
+        ra_server = IP6NDRA(socket, vpp_socket, vpp, conf.ip6ndra)
+        t = tg.create_task(ra_server.listen())
         tasks.append(t)
 
     return tasks
 
-def dhc4clientevent(event):
-    print('RECEIVED AN EVENT', event)
-    # rv = self.vpp.vpp_ip_address(self.if_index, prefix)
-    # print('RV', rv)
-    # Create a NAT instance with that address as the NAT pool
-
-    # if self.nat:
-    #     print('CONFIGURING NAT INSTANCE', self.nat, client_ip)
-    #     rv = self.vpp.vpp_vcdp_nat_add(self.nat, [client_ip])
-    #     print('RV', rv)
-    #     rv = self.vpp.vpp_vcdp_nat_bind_set_unset(self.tenant_id, self.nat)
-    #     print('RV', rv)
-
-async def handle_events(event_queue: asyncio.Queue):
-    while True:
-        event = await event_queue.get()
-        if isinstance(event, DHCP4ClientEvent):
-            dhcp4clientevent(event)
-        # Process the event
-        print(f"Handling event: {event}")
 
 async def main_coroutine(validatedconf, vpp) -> None:
     import traceback
-    # event_queue = asyncio.Queue()
+
     try:
         async with asyncio.TaskGroup() as tg:
             tasks = setup_tasks(tg, validatedconf, vpp)
-            # events = tg.create_task(handle_events(event_queue))
     except ExceptionGroup as eg:
         print(f"ExceptionGroup caught: {eg}")
         for exc in eg.exceptions:
@@ -139,13 +119,15 @@ async def main_coroutine(validatedconf, vpp) -> None:
             print("Traceback:")
             traceback.print_exception(type(exc), exc, exc.__traceback__)
 
+
 @app.command()
-def main(config: typer.FileText,
-         log: str = None,
-         logfile: str = None,
-         logpacket: bool = False,
-         version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True), # pylint: disable=unused-argument
-         ) -> None:
+def main(
+    config: typer.FileText,
+    log: str = None,
+    logfile: str = None,
+    logpacket: bool = False,
+    version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True),  # pylint: disable=unused-argument
+) -> None:
     """The main entry point for the VPPDHC daemon."""
     numeric_level = logging.INFO
     if log:
@@ -153,13 +135,19 @@ def main(config: typer.FileText,
     if not isinstance(numeric_level, int):
         raise ValueError(f"Invalid log level: {log}")
     if logfile:
-        logging.basicConfig(filename=logfile, encoding='utf-8',
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        level=numeric_level)
+        logging.basicConfig(
+            filename=logfile,
+            encoding="utf-8",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            level=numeric_level,
+        )
     else:
-        logging.basicConfig(stream=sys.stdout, encoding='utf-8',
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        level=numeric_level)
+        logging.basicConfig(
+            stream=sys.stdout,
+            encoding="utf-8",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            level=numeric_level,
+        )
     packetloglevel = logging.DEBUG if logpacket else logging.INFO
     logging.getLogger("vppdhc.dhc4client.packet").setLevel(packetloglevel)
     logging.getLogger("vppdhc.dhc4server.packet").setLevel(packetloglevel)
@@ -175,8 +163,7 @@ def main(config: typer.FileText,
 
     vpp = None
     if validatedconf.vpp:
-        vpp = VPP(None)
-
+        vpp = VPP.create()
 
     logger.debug("Running main loop")
     try:
@@ -184,11 +171,11 @@ def main(config: typer.FileText,
     except KeyboardInterrupt:
         print("Exiting application...")
 
-
     # # Cleanup (delete the bound socket file)
     # uds_receive_socket.close()
     # uds_send_socket.close()
     # os.remove(RECEIVE_SOCK_PATH)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app()
