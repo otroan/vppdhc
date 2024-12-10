@@ -17,6 +17,8 @@ from vppdhc.dhc4client import DHC4Client
 from vppdhc.dhc4server import DHC4Server
 from vppdhc.dhc6client import DHC6Client
 from vppdhc.dhc6server import DHC6Server
+from vppdhc.event_manager import EventManager
+from vppdhc.businesslogic import BusinessLogic
 from vppdhc.raadv import IP6NDRA
 from vppdhc.vppdhcdctl import VPPDHCD
 from vppdhc.vpppunt import VPP, VppEnum
@@ -32,7 +34,7 @@ def version_callback(value: bool):
         raise typer.Exit
 
 
-def setup_tasks(tg, conf, vpp) -> list:
+async def setup_tasks(tg, conf, vpp, event_manager) -> list:
     """Set up the tasks."""
     tasks = []
     # Initialise the control socket
@@ -48,40 +50,40 @@ def setup_tasks(tg, conf, vpp) -> list:
     # DHCPv4 client
     if conf.dhc4client:
         logger.debug("Starting DHCPv4 client")
-        socket, vpp_socket = vpp.vpp_socket_register(
+        socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP4, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 68
         )
 
-        dhc4_client = DHC4Client(socket, vpp_socket, vpp, conf.dhc4client)
+        dhc4_client = DHC4Client(socket, vpp_socket, vpp, conf, event_manager)
         t = tg.create_task(dhc4_client.client())
         tasks.append(t)
 
     # DHCPv4 server
     if conf.dhc4server:
         logger.debug("Starting DHCPv4 server")
-        socket, vpp_socket = vpp.vpp_socket_register(
+        socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP4, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 67
         )
 
-        dhc4_server = DHC4Server(socket, vpp_socket, vpp, conf.dhc4server)
+        dhc4_server = DHC4Server(socket, vpp_socket, vpp, conf)
         t = tg.create_task(dhc4_server.listen())
         tasks.append(t)
 
     # DHCPv6 client
     if conf.dhc6client:
         logger.debug("Starting DHCPv6 client")
-        socket, vpp_socket = vpp.vpp_socket_register(
+        socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 546
         )  # pylint: disable=no-member
 
-        dhc6_client = DHC6Client(socket, vpp_socket, vpp, conf.dhc6client)
+        dhc6_client = DHC6Client(socket, vpp_socket, vpp, conf.dhc6client, event_manager)
         t = tg.create_task(dhc6_client.client())
         tasks.append(t)
 
     # DHCPv6 server
     if conf.dhc6server:
         logger.debug("Starting DHCPv6 server")
-        socket, vpp_socket = vpp.vpp_socket_register(
+        socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 547
         )  # pylint: disable=no-member
         try:
@@ -96,7 +98,7 @@ def setup_tasks(tg, conf, vpp) -> list:
     if conf.ip6ndra:
         logger.debug("Starting RA advertisement daemon")
         # Get router solicitations
-        socket, vpp_socket = vpp.vpp_socket_register(
+        socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6, 133
         )  # pylint: disable=no-member
         ra_server = IP6NDRA(socket, vpp_socket, vpp, conf.ip6ndra)
@@ -106,19 +108,24 @@ def setup_tasks(tg, conf, vpp) -> list:
     return tasks
 
 
-async def main_coroutine(validatedconf, vpp) -> None:
+async def main_coroutine(validatedconf) -> None:
     import traceback
+    event_manager = EventManager()
+    vpp = None
+    if validatedconf.vpp:
+        vpp = await VPP.create()
+
+    _ = BusinessLogic(event_manager, vpp)
 
     try:
         async with asyncio.TaskGroup() as tg:
-            tasks = setup_tasks(tg, validatedconf, vpp)
+            tasks = await setup_tasks(tg, validatedconf, vpp, event_manager)
     except ExceptionGroup as eg:
         print(f"ExceptionGroup caught: {eg}")
         for exc in eg.exceptions:
             print(f"Task exception: {exc}")
             print("Traceback:")
             traceback.print_exception(type(exc), exc, exc.__traceback__)
-
 
 @app.command()
 def main(
@@ -161,13 +168,9 @@ def main(
 
     logger.debug("Configuration %s", validatedconf)
 
-    vpp = None
-    if validatedconf.vpp:
-        vpp = VPP.create()
-
     logger.debug("Running main loop")
     try:
-        asyncio.run(main_coroutine(validatedconf, vpp))
+        asyncio.run(main_coroutine(validatedconf))
     except KeyboardInterrupt:
         print("Exiting application...")
 

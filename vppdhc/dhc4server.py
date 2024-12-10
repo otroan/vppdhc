@@ -22,15 +22,18 @@ from scapy.utils import str2mac
 
 from vppdhc.vppdhcdctl import register_command
 from vppdhc.vpppunt import Actions, VPPPunt
+from vppdhc.datamodel import Configuration
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
+
 
 class DHC4ServerNoIPaddrAvailableError(Exception):
     """No IP address available."""
 
 
 ##### DHCP Binding database #####
+
 
 @register_command("dhcp", "bindings")
 def command_dhcp_binding(args=None) -> str:
@@ -45,6 +48,7 @@ def command_dhcp_binding(args=None) -> str:
         s += v.model_dump_json(indent=4, exclude_none=True)
     return s
 
+
 def options2dict(packet) -> dict:
     """Get DHCP message type."""
     # Return all options in a dictionary
@@ -53,6 +57,7 @@ def options2dict(packet) -> dict:
     for op in packet[DHCP].options:
         options[op[0]] = op[1]
     return options
+
 
 def get_ip_index(ip: str, network: str) -> int:
     """Get the index of an IP address in a network."""
@@ -65,9 +70,12 @@ def get_ip_index(ip: str, network: str) -> int:
         return int(ip_address) - int(network_address.network_address)
     raise ValueError
 
+
 def get_epoch() -> int:
     """Get the current epoch time."""
     return int(time.time())
+
+
 class DHC4BindingState(Enum):
     """State of the binding."""
 
@@ -77,6 +85,7 @@ class DHC4BindingState(Enum):
     RESERVED = "RESERVED"
     OFFERED = "OFFERED"
 
+
 class DHC4Lease(BaseModel):
     """DHCPv4 Lease information."""
 
@@ -85,12 +94,13 @@ class DHC4Lease(BaseModel):
     hostname: str | None  # Hostname, if provided by the client
     last_updated: int  # Timestamp for when the lease was first issued
     status: DHC4BindingState
-    client_id: bytes | None # DHCP client identifier (if used by the client)
+    client_id: bytes | None  # DHCP client identifier (if used by the client)
 
     @field_serializer("mac_address")
     def serialize_mac_address(self, value: bytes) -> str:
         # Serialize `bytes` to Base64-encoded string
         return str2mac(value)
+
     @field_serializer("client_id")
     def serialize_client_id(self, value: bytes) -> str:
         # Serialize `bytes` to Base64-encoded string
@@ -98,8 +108,10 @@ class DHC4Lease(BaseModel):
             return ""
         return value.hex()
 
+
 class DHC4ServerNoIPaddrAvailableError(Exception):
     pass
+
 
 class DHC4BindingDatabase(BaseModel):
     """DHCPv4 Binding database."""
@@ -118,11 +130,13 @@ class DHC4BindingDatabase(BaseModel):
     @field_serializer("mac_address")
     def serialize_mac_address(self, value: bytes) -> str:
         return str2mac(value)
+
     @field_serializer("lease_by_client_id")
     def serialize_lease_by_client_id(self, value: bytes) -> str:
         return None
+
     @field_serializer("leases")
-    def serialize_leases(self, value: list[IPv4Address]|None) -> str:
+    def serialize_leases(self, value: list[IPv4Address] | None) -> str:
         return [lease for lease in value if lease is not None]
 
     def static_ip(self, ip: IPv4Address) -> None:
@@ -138,6 +152,7 @@ class DHC4BindingDatabase(BaseModel):
             renew_time=None,
             rebind_time=None,
         )
+
     def __init__(self, **data):
         """Initialize the DHCPv4 binding database."""
         super().__init__(**data)
@@ -149,13 +164,15 @@ class DHC4BindingDatabase(BaseModel):
         self.leases.extend([None] * (self.network.num_addresses))
         # Reserve the first 10% of a prefix to manually configured addresses up to 256 addresses
         reserved = min(int(self.network.num_addresses / 10), 256)
-        logger.debug("Creating new DHCP binding database for: %s %s reserved %d", self.interface, self.network, reserved)
+        logger.debug(
+            "Creating new DHCP binding database for: %s %s reserved %d", self.interface, self.network, reserved
+        )
         reserved_addresses = list(self.network)[:reserved]
         for ip in reserved_addresses:
             # Set a lease for the reserved addresses at given index
             self.static_ip(ip)
-        self.static_ip(self.server_ip) # Reserve the router address
-        self.probed_duplicates = {} # Probed duplicates
+        self.static_ip(self.server_ip)  # Reserve the router address
+        self.probed_duplicates = {}  # Probed duplicates
 
     def get_next_free(self, client_id: bytes, reqip=None) -> IPv4Address:
         """Get the next free IP address."""
@@ -218,8 +235,7 @@ class DHC4BindingDatabase(BaseModel):
         """Return subnet mask."""
         return self.network.netmask
 
-
-    def reserve(self, mac_address: bytes , client_id: bytes, hostname: str, reqip=None) -> IPv4Address:
+    def reserve(self, mac_address: bytes, client_id: bytes, hostname: str, reqip=None) -> IPv4Address:
         """Reserve a new IP address."""
         ip = self.get_next_free(client_id, reqip)
 
@@ -297,7 +313,7 @@ class DHC4BindingDatabase(BaseModel):
 
     def verify_or_extend_lease(self, client_id: bytes, reqip: IPv4Address) -> IPv4Address:
         """Verify or extend a lease."""
-        print('*** REQIP ***', reqip)
+        print("*** REQIP ***", reqip)
         index = get_ip_index(reqip, self.network)
         lease = self.leases[index]
 
@@ -314,14 +330,17 @@ class DHC4BindingDatabase(BaseModel):
         repb.op = "BOOTREPLY"
         repb.yiaddr = 0
         repb.siaddr = 0
-        repb.ciaddr = 0                 # Client address
-        repb.giaddr = req[BOOTP].giaddr # Relay agent IP
-        repb.chaddr = req[BOOTP].chaddr # Client hardware address
-        repb.sname = "vppdhcpd"         # Server name not given
+        repb.ciaddr = 0  # Client address
+        repb.giaddr = req[BOOTP].giaddr  # Relay agent IP
+        repb.chaddr = req[BOOTP].chaddr  # Client hardware address
+        repb.sname = "vppdhcpd"  # Server name not given
         del repb.payload
-        resp = (Ether(src=self.mac_address, dst=mac) /
-                IP(src=self.server_ip, dst=dst_ip) /
-                UDP(sport=req.dport, dport=req.sport) / repb)
+        resp = (
+            Ether(src=self.mac_address, dst=mac)
+            / IP(src=self.server_ip, dst=dst_ip)
+            / UDP(sport=req.dport, dport=req.sport)
+            / repb
+        )
 
         dhcp_options = [("message-type", "nak")]
         dhcp_options.append("end")
@@ -345,19 +364,19 @@ class DHC4Server:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, receive_socket, send_socket, vpp, conf) -> None:
+    def __init__(self, receive_socket, send_socket, vpp, conf: Configuration) -> None:
         """DHCPv4 Server."""
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
 
-        self.renewal_time = conf.renewal_time
-        self.lease_time = conf.lease_time
-        self.name_server = conf.dns
-        self.tenant_id = conf.bypass_tenant
-        self.ipv6_only_preferred = conf.ipv6_only_preferred
+        self.renewal_time = conf.dhc4server.renewal_time
+        self.lease_time = conf.dhc4server.lease_time
+        self.name_server = conf.dhc4server.dns
+        self.tenant_id = conf.system.bypass_tenant
+        self.ipv6_only_preferred = conf.dhc4server.ipv6_only_preferred
 
-        self.dbs = {}   # DHCPv4 Binding databases
+        self.dbs = {}  # DHCPv4 Binding databases
 
     @classmethod
     def get_instance(cls, *args, **kwargs):
@@ -365,8 +384,7 @@ class DHC4Server:
             cls._instance = cls(*args, **kwargs)
         return cls._instance
 
-
-    async def process_packet(self, db: DHC4BindingDatabase, req: Packet): # pylint: disable=too-many-locals
+    async def process_packet(self, db: DHC4BindingDatabase, req: Packet):  # pylint: disable=too-many-locals
         """Process a DHCP packet."""
         dhcp_server_ip = db.server_ip
 
@@ -392,7 +410,7 @@ class DHC4Server:
 
         reqip = IPv4Address(reqip) if reqip else req[IP].src
 
-        if msgtype == 1: # discover
+        if msgtype == 1:  # discover
             # Reserve a new address
             dst_ip = "255.255.255.255"
             try:
@@ -402,12 +420,14 @@ class DHC4Server:
                 logger.exception("*** ERROR No IP address available for: %s ***", mac_address)
                 return db.nak(dst_ip, req)
 
-        elif msgtype == 3: # request
+        elif msgtype == 3:  # request
             if server_id:
                 if IPv4Address(server_id) != dhcp_server_ip:
                     # Someone else won
                     db.free_lease(client_id)
-                    logger.error("*** ERROR Unknown server id %s expected %s from %s ***", server_id, dhcp_server_ip, chaddrstr)
+                    logger.error(
+                        "*** ERROR Unknown server id %s expected %s from %s ***", server_id, dhcp_server_ip, chaddrstr
+                    )
                     return None
 
                 # In response to a previous offer. Create a new lease.
@@ -423,7 +443,7 @@ class DHC4Server:
                     return db.nak(ip, req)
                 logger.debug("RENEW/REBIND: %s: %s", mac_address, ip)
                 dst_ip = ip
-        elif msgtype == 4: # decline
+        elif msgtype == 4:  # decline
             # Address declined, like duplicate
             db.decline(client_id, reqip)
             logger.error("DECLINE: %s: %s", mac_address, reqip)
@@ -439,30 +459,34 @@ class DHC4Server:
         mac = req[Ether].src
 
         if 108 in params and self.ipv6_only_preferred and msgtype in (1, 3):
-            include_108 = 0 # Default wait time
+            include_108 = 0  # Default wait time
 
         repb = req.getlayer(BOOTP).copy()
         repb.op = "BOOTREPLY"
-        repb.yiaddr = ip                # Your client address
-        repb.siaddr = dhcp_server_ip    # Next server
-        repb.ciaddr = 0                 # Client address
-        repb.giaddr = req[BOOTP].giaddr # Relay agent IP
-        repb.chaddr = req[BOOTP].chaddr # Client hardware address
-        repb.sname = "vppdhcpd"         # Server name not given
+        repb.yiaddr = ip  # Your client address
+        repb.siaddr = dhcp_server_ip  # Next server
+        repb.ciaddr = 0  # Client address
+        repb.giaddr = req[BOOTP].giaddr  # Relay agent IP
+        repb.chaddr = req[BOOTP].chaddr  # Client hardware address
+        repb.sname = "vppdhcpd"  # Server name not given
         del repb.payload
 
-        resp = (Ether(src=db.mac_address, dst=mac) /
-                IP(src=dhcp_server_ip, dst=dst_ip) /
-                UDP(sport=req.dport, dport=req.sport) / repb)
+        resp = (
+            Ether(src=db.mac_address, dst=mac)
+            / IP(src=dhcp_server_ip, dst=dst_ip)
+            / UDP(sport=req.dport, dport=req.sport)
+            / repb
+        )
 
         dhcp_options = [
-                (op[0], {1: 2, 3: 5}.get(op[1], op[1]))
-                for op in req[DHCP].options
-                if isinstance(op, tuple) and op[0] == "message-type"
-            ]
+            (op[0], {1: 2, 3: 5}.get(op[1], op[1]))
+            for op in req[DHCP].options
+            if isinstance(op, tuple) and op[0] == "message-type"
+        ]
 
         dhcp_options += [
-            x for x in [
+            x
+            for x in [
                 ("server_id", dhcp_server_ip),
                 ("router", dhcp_server_ip),
                 ("name_server", self.name_server[0]),
@@ -481,7 +505,16 @@ class DHC4Server:
     async def listen(self) -> None:
         """Listen for DHCP requests."""
         # Clients send from their unicast address to 255.255.255.255:67
-        await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, "255.255.255.255", 17, 0, 67)
+        primary_key = {
+            "context_id": 0,
+            "src": "0.0.0.0",
+            "dst": "255.255.255.255",
+            "sport": 0,
+            "dport": 67,
+            "proto": 17,
+        }
+        rv = await self.vpp.vpp_vcdp_session_add(self.tenant_id, primary_key=primary_key)
+        logger.debug("VCDP session add: %s", rv)
 
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
@@ -499,7 +532,7 @@ class DHC4Server:
                 continue
 
             reqb = packet.getlayer(BOOTP)
-            if reqb.op != 1: # BOOTPREQUEST
+            if reqb.op != 1:  # BOOTPREQUEST
                 continue
 
             ifindex = packet[VPPPunt].iface_index
@@ -509,15 +542,16 @@ class DHC4Server:
                 interface_info = await self.vpp.vpp_interface_info(ifindex)
 
                 # Create a new DHCPv4 pool based on the interface IP address/subnet
-                db = self.dbs[ifindex] = DHC4BindingDatabase(ifindex=ifindex,
-                                                               interface=interface_info.name,
-                                                               mac_address=interface_info.mac,
-                                                               server_ip=interface_info.ip4[0].ip,
-                                                               leases=[],
-                                                               network=interface_info.ip4[0].network,
-                                                               dns_servers=self.name_server,
-                                                               lease_by_client_id={},
-                                                               )
+                db = self.dbs[ifindex] = DHC4BindingDatabase(
+                    ifindex=ifindex,
+                    interface=interface_info.name,
+                    mac_address=interface_info.mac,
+                    server_ip=interface_info.ip4[0].ip,
+                    leases=[],
+                    network=interface_info.ip4[0].network,
+                    dns_servers=self.name_server,
+                    lease_by_client_id={},
+                )
 
                 # Add a 3-tuple session so to get DHCP unicast packets
                 await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)

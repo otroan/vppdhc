@@ -1,6 +1,8 @@
 import asyncio
 from typing import Any
+import logging
 
+logger = logging.getLogger(__name__)
 
 class EventManager:
     def __init__(self):
@@ -14,6 +16,7 @@ class EventManager:
 
     async def publish(self, event_name: str, data: Any) -> None:
         """Asynchronously notify all subscribers of an event."""
+        logger.debug("Publishing event %s", event_name)
         if event_name in self.subscribers:
             tasks = [asyncio.create_task(callback(data)) for callback in self.subscribers[event_name]]
             await asyncio.gather(*tasks)

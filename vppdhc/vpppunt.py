@@ -15,7 +15,7 @@ from scapy.fields import IntEnumField, LEIntField
 from scapy.layers.l2 import Ether
 from vpp_papi.vpp_papi_async import VPPApiClient, VppEnum
 from vppdhc.datamodel import VPPInterfaceInfo
-from ipaddress import IPv6Network
+from ipaddress import IPv6Network, IPv4Address, IPv6Address, ip_address
 
 logger = logging.getLogger(__name__)
 logging.getLogger("vpp_papi").setLevel(logging.ERROR)
@@ -68,7 +68,8 @@ class VPP:
         instance = cls()
         logger.debug("Connecting to VPP")
         rv = await instance.vpp.connect("vppdhc", instance.event_queue)
-        assert rv == 0
+        if rv < 0:
+            raise IOError(f"Error connecting to VPP: {rv}")
         logger.debug("Connected to VPP")
         rv = await instance.vpp.api.show_version()
         logger.debug(f"VPP version: {rv}")
@@ -76,7 +77,7 @@ class VPP:
 
     async def vpp_interface_name2index(self, ifname: str) -> int:
         """Returns the interface index for the given interface name."""
-        interface_details = await self.vpp.api.sw_interface_dump(name_filter_valid=1, name_filter=ifname)
+        r, interface_details = await self.vpp.api.sw_interface_dump(name_filter_valid=1, name_filter=ifname)
         if len(interface_details) != 1:
             raise VPPDHCException(f"Interface {ifname} not found")
         return interface_details[0].sw_if_index
@@ -126,12 +127,16 @@ class VPP:
         logger.info(f"Punt socket register: {rv}")
         return pathname, rv.pathname
 
-    async def vpp_ip6_route_add(self, prefix, nexthop, nh_ifindex=0xFFFFFFFF, table_id=0, src=0):
-        """Adds an IPv6 route"""
+    async def vpp_ip_route_add(self, prefix, nexthop: ip_address, nh_ifindex=0xFFFFFFFF, table_id=0, src=0):
+        """Adds an IPv4|v6 route"""
 
         # Path
-        proto = 1  # IPv6
-        nh = {"address": {"ip6": nexthop}}
+        if isinstance(nexthop, IPv6Address):
+            proto = VppEnum.vl_api_fib_path_nh_proto_t.FIB_API_PATH_NH_PROTO_IP6
+            nh = {"address": {"ip6": nexthop}}
+        else:
+            proto = VppEnum.vl_api_fib_path_nh_proto_t.FIB_API_PATH_NH_PROTO_IP4
+            nh = {"address": {"ip4": nexthop}}
         path = {
             "weight": 1,
             "preference": 0,
@@ -235,10 +240,10 @@ class VPP:
     async def vpp_vcdp_nat_bind_set_unset(self, tenant_id, nat_id, is_set=True):
         return await self.vpp.api.vcdp_nat_bind_set_unset(tenant_id=tenant_id, nat_id=nat_id, is_set=is_set)
 
-    async def vpp_vcdp_session_add(self, tenant_id, src, dst, protocol, sport, dport):
-        return await self.vpp.api.vcdp_session_add(
-            tenant_id=tenant_id, context_id=0, src=src, dst=dst, protocol=protocol, sport=sport, dport=dport
-        )
+    async def vpp_vcdp_session_add(self, tenant_id, primary_key, secondary_key=None):
+        return await self.vpp.api.vcdp_session_add(tenant_id=tenant_id,
+                                                   primary_key=primary_key,
+                                                   secondary_key=secondary_key)
 
     async def vpp_ip_multicast_group_join(self, group):
         return await self.vpp.api.ip_multicast_group_join(grp_address=group)

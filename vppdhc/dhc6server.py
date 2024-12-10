@@ -240,7 +240,6 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
 
     async def listen(self) -> None:
         """DHCPv6 Server."""
-
         self.if_index = await self.vpp.vpp_interface_name2index(self.if_name)
         logger.debug("Getting interface index for: %s %s", self.if_name, self.if_index)
 

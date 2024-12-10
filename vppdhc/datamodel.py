@@ -22,9 +22,18 @@ class ConfVPP(BaseModel):
 
     socket: str
 
+class ConfSystem(BaseModel):
+    """Global configuration."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    bypass_tenant: int = Field(alias="bypass-tenant")
+    log_level: str = Field(alias="log-level")
+    log_file: str = Field(alias="log-file", default=None)
+
 class ConfDHC4Client(BaseModel):
     """DHCPv4 client configuration."""
 
+    model_config = ConfigDict(populate_by_name=True)
     interface: str
 
 class DHC4ClientStateMachine(IntEnum):
@@ -40,6 +49,7 @@ class DHC4ClientStateMachine(IntEnum):
 class DHC4ClientEvent(BaseModel):
     """DHCPv4 client event."""
 
+    ifindex: int = None
     ip: IPv4Interface = None
     state: DHC4ClientStateMachine = None
     options: dict = None
@@ -52,7 +62,6 @@ class ConfDHC4Server(BaseModel):
     renewal_time: int = Field(alias="renewal-time")
     dns: list[IPv4Address]
     ipv6_only_preferred: bool = Field(alias="ipv6-only-preferred", default=False)
-    bypass_tenant: int = Field(alias="bypass-tenant")
 
 class ConfDHC6Client(BaseModel):
     """DHCPv6 PD client configuration."""
@@ -61,10 +70,6 @@ class ConfDHC6Client(BaseModel):
     interface: str
     ia_pd: bool = True
     ia_na: bool = False
-
-
-    internal_prefix: IPv6Network = Field(alias="internal-prefix") # Move to "business logic"
-    npt66: bool = False # Move to "business logic"
 
 class ConfDHC6Server(BaseModel):
     """DHCPv6 server configuration."""
@@ -95,6 +100,7 @@ class ConfIP6NDRA(BaseModel):
 class Configuration(BaseModel):
     """Configuration model."""
 
+    system: ConfSystem = None
     vpp: ConfVPP = None
     dhc4client: ConfDHC4Client = None
     dhc4server: ConfDHC4Server = None

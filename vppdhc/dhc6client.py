@@ -60,16 +60,15 @@ class DHC6Client:
         self.send_socket = send_socket
         self.vpp = vpp
         self.if_name = conf.interface
-        self.npt66 = conf.npt66
-        self.internal_prefix = conf.internal_prefix
         self.ia_pd = conf.ia_pd
         self.ia_na = conf.ia_na
         self.event_manager = event_manager
 
         self.bindings = {}
 
-    def validate_reply(self, reply: Packet) -> bool:
+    async def process_reply(self, reply: Packet, *, committed: bool) -> bool:
         """Validate a DHCPv6 reply packet."""
+        iapd = iana = None
         if self.ia_pd:
             if reply.haslayer(DHCP6OptIA_PD):
                 iapd = reply[DHCP6OptIA_PD]
@@ -86,6 +85,9 @@ class DHC6Client:
                     return False
             else:
                 return False
+        if committed:
+            bindings = {"iapd": iapd, "iana": iana}
+            await self.event_manager.publish("/dhc6c/on_lease", bindings)
         return True
 
     async def process_reply(self, reply: Packet) -> None:
@@ -226,7 +228,7 @@ class DHC6Client:
 
             if reply.haslayer(DHCP6_Advertise):
                 logger.debug("Received DHCPv6 Advertise")
-                if not self.validate_reply(reply):
+                if not await self.process_reply(reply, committed=False):
                     logger.error("Invalid DHCPv6 Advertise")
                     self.state = StateMachine.INIT
                     await asyncio.sleep(rt)
@@ -238,7 +240,7 @@ class DHC6Client:
                 self.state = StateMachine.BOUND
                 # Is it sufficient to just set rt to T1?
                 # Process reply failed, wait for a RT before retrying
-                if not self.validate_reply(reply):
+                if not await self.process_reply(reply, committed=True):
                     logger.error("Invalid DHCPv6 Reply")
                     self.state = StateMachine.INIT
                     await asyncio.sleep(rt)
