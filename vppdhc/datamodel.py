@@ -16,6 +16,7 @@ class VPPInterfaceInfo(BaseModel):
         ip4: list[IPv4Interface]
         ip6: list[IPv6Address]
         ip6ll: IPv6Address
+        duid: bytes = None
 
 class ConfVPP(BaseModel):
     """Configuration for VPP."""

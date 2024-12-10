@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, Mock, AsyncMock
 from vppdhc.vpppunt import VPPPunt, Actions
 from vppdhc.datamodel import IPv6Interface, VPPInterfaceInfo, IPv6Address, ConfDHC6Client, ConfDHC6Server
 from vppdhc.event_manager import EventManager
-import vppdhc.businesslogic
+from vppdhc.businesslogic import BusinessLogic
 
 def pytest_configure(config):
     # Set the asyncio loop scope for this test file only
@@ -40,6 +40,29 @@ async def dhcp_core_test(event_manager, client_task, server_task):
     server_task.cancel()
     client_task.cancel()
 
+interfaceinfo={}
+interfaceinfo[42] = VPPInterfaceInfo(
+    ifindex=42,
+    name="eth0",
+    mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+    ip6=[IPv6Interface("1::1/128"), IPv6Interface("fd00::1/64")],
+    ip4=[],
+    ip6ll=IPv6Address("fe80::1"),
+)
+interfaceinfo[43] = VPPInterfaceInfo(
+    ifindex=43,
+    name="eth1",
+    mac=b"\xaa\xbb\xcc\xdd\xee\xff",
+    ip6=[IPv6Interface("2::1/128")],
+    ip4=[],
+    ip6ll=IPv6Address("fe80::2"),
+)
+
+def mock_interface_info(ifindex):
+    return interfaceinfo[ifindex]
+
+def mock_name2index(name):
+    return 42 if name == "eth0" else 43
 
 @pytest.mark.asyncio
 async def test_dhc6client() -> None:
@@ -52,11 +75,10 @@ async def test_dhc6client() -> None:
     server_socket_path = "\0" + server_socket.name
 
     event_manager = EventManager()
-    vppdhc.businesslogic.init(event_manager)
     client_config = ConfDHC6Client(interface="eth0", ia_pd=True, ia_na=True,
                                    internal_prefix="fd00::/64", npt66=True)
     server_config = ConfDHC6Server(
-        interfaces=["eth0"],
+        interfaces=["eth0", "eth1"],
         dns=["1::1"],
         ia_na=True,
         ia_prefix=[IPv6Network("2001:DB8::/56")],
@@ -64,22 +86,15 @@ async def test_dhc6client() -> None:
     )
 
     vpp = Mock()
-    vpp.vpp_interface_name2index = AsyncMock(return_value=42)
+    vpp.vpp_interface_name2index = AsyncMock(side_effect=mock_name2index)
     vpp.vpp_probe_is_duplicate = AsyncMock(return_value=False)
     vpp.vpp_ip_multicast_group_join = AsyncMock(return_value=None)
+    _ = BusinessLogic(event_manager, vpp)
 
-    interfaceinfo = VPPInterfaceInfo(
-        ifindex=42,
-        name="eth0",
-        mac=b"\xaa\xbb\xcc\xdd\xee\xff",
-        ip6=[IPv6Interface("1::1/128")],
-        ip4=[],
-        ip6ll=IPv6Address("fe80::1"),
-    )
 
     logging.getLogger("vppdhc.dhc6client.packet").setLevel(logging.INFO)
 
-    vpp.vpp_interface_info = AsyncMock(return_value=interfaceinfo)
+    vpp.vpp_interface_info = AsyncMock(side_effect=mock_interface_info)
 
     client = DHC6Client(client_socket_path, server_socket_path, vpp, client_config, event_manager)
     server = DHC6Server(server_socket_path, client_socket_path, vpp, server_config)

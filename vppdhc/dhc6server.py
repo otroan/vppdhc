@@ -42,6 +42,7 @@ from scapy.layers.l2 import Ether  # type: ignore
 
 from vppdhc.vppdhcdctl import register_command
 from vppdhc.vpppunt import Actions, VPPPunt
+from vppdhc.datamodel import VPPInterfaceInfo
 
 # Configuration
 # If no configuration is given, the DHCPv6 server will find the prefix(es) configured
@@ -76,7 +77,8 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
         self.vpp = vpp
 
         self.if_names = conf.interfaces
-        self.if_name = self.if_names[0]
+        self.interface_info = {}
+        self.duids = {}
 
         self.preflft = conf.preflft
         self.validlft = conf.validlft
@@ -87,12 +89,11 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
         self.ia_na = conf.ia_na
         self.prefix_leases = {}
 
-    def mk_address(self, clientduid, iaid):
+    def mk_address(self, interface_info: VPPInterfaceInfo, clientduid, iaid) -> IPv6Address:
         """Create an IPv6 address from the client's DUID and IAID."""
         interface_id = hashlib.sha256(bytes(clientduid) + iaid.to_bytes(4, "big")).digest()[:8]
-
         # Concatenate self.prefix and interface_id to create the IPv6 address
-        return IPv6Address(int(self.prefix.network_address) + int.from_bytes(interface_id, "big"))
+        return IPv6Address(int(interface_info.ip6[0].network.network_address) + int.from_bytes(interface_id, "big"))
 
     def mk_prefix(self, clientduid, iaid):
         """Allocate an IPv6 prefix from the client's DUID and IAID."""
@@ -102,17 +103,17 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
                 return subnet
         raise ValueError("No free prefixes available!")
 
-    def process_request(self, request: Packet, trid, msgtype) -> Packet:
+    def process_request(self, interface_info: VPPInterfaceInfo, request: Packet, trid, msgtype) -> Packet:
         """Process a DHCPv6 solicit/request packet."""
         clientid = request[DHCP6OptClientId]
         clientduid = clientid.duid
         reply_msg = DHCP6_Advertise(trid=trid) if msgtype == 1 else DHCP6_Reply(trid=trid)
         reply = (
-            Ether(src=self.interface_info.mac, dst=request[Ether].src)
-            / IPv6(src=self.interface_info.ip6ll, dst=request[IPv6].src)
+            Ether(src=interface_info.mac, dst=request[Ether].src)
+            / IPv6(src=interface_info.ip6ll, dst=request[IPv6].src)
             / UDP(sport=547, dport=546)
             / reply_msg
-            / DHCP6OptServerId(duid=self.duid)
+            / DHCP6OptServerId(duid=interface_info.duid)
             / DHCP6OptClientId(duid=clientduid)
         )
 
@@ -122,7 +123,7 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
         if self.ia_na:
             if request.haslayer(DHCP6OptIA_NA):
                 iaid = request[DHCP6OptIA_NA].iaid
-                ipv6 = self.mk_address(clientduid, iaid)
+                ipv6 = self.mk_address(interface_info, clientduid, iaid)
                 logger.debug("Allocating IPv6 address %s to client %s from %s", ipv6, clientduid, request[IPv6].src)
                 t1 = int(0.5 * self.preflft)
                 t2 = int(0.875 * self.preflft)
@@ -159,7 +160,7 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
                     iapdopt=DHCP6OptStatusCode(statuscode=6, statusmsg="Why do you think we support PD here?")
                 )
 
-        return VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / reply
+        return VPPPunt(iface_index=request[VPPPunt].iface_index, action=Actions.PUNT_L2) / reply
 
     # def process_request(self, request: Packet, trid: int, msgtype: int) -> Packet:
     #     """Process a DHCPv6 solicit/request packet."""
@@ -205,54 +206,49 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
 
     #     return VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / reply
 
-    def process_release(self, release: Packet, trid: int) -> Packet:
+    def process_release(self, interface_info: VPPInterfaceInfo, release: Packet, trid: int) -> Packet:
         """Process a DHCPv6 Release packet."""
         logger.error("Received DHCPv6 Release %s", release.show2(dump=True))
         clientid = release[DHCP6OptClientId]
         clientduid = clientid.duid
 
         reply = (
-            Ether(src=self.interface_info.mac, dst=release[Ether].src)
-            / IPv6(src=self.interface_info.ip6ll, dst=release[IPv6].src)
+            Ether(src=interface_info.mac, dst=release[Ether].src)
+            / IPv6(src=interface_info.ip6ll, dst=release[IPv6].src)
             / UDP(sport=547, dport=546)
             / DHCP6_Reply(trid=trid)
-            / DHCP6OptServerId(duid=self.duid)
+            / DHCP6OptServerId(duid=interface_info.duid)
             / DHCP6OptClientId(duid=clientduid)
             / DHCP6OptStatusCode(statuscode=0, statusmsg="Success")
         )
         return reply
 
-    def process_decline(self, decline: Packet, trid: int) -> Packet:
+    def process_decline(self, interface_info: VPPInterfaceInfo, decline: Packet, trid: int) -> Packet:
         """Process a DHCPv6 Decline packet."""
         logger.error("Received DHCPv6 Decline %s", decline.show2(dump=True))
         clientid = decline[DHCP6OptClientId]
         clientduid = clientid.duid
 
         return (
-            Ether(src=self.interface_info.mac, dst=decline[Ether].src)
-            / IPv6(src=self.interface_info.ip6ll, dst=decline[IPv6].src)
+            Ether(src=interface_info.mac, dst=decline[Ether].src)
+            / IPv6(src=interface_info.ip6ll, dst=decline[IPv6].src)
             / UDP(sport=547, dport=546)
             / DHCP6_Reply(trid=trid)
-            / DHCP6OptServerId(duid=self.duid)
+            / DHCP6OptServerId(duid=interface_info.duid)
             / DHCP6OptClientId(duid=clientduid)
             / DHCP6OptStatusCode(statuscode=0, statusmsg="Success")
         )
 
     async def listen(self) -> None:
         """DHCPv6 Server."""
-        self.if_index = await self.vpp.vpp_interface_name2index(self.if_name)
-        logger.debug("Getting interface index for: %s %s", self.if_name, self.if_index)
-
-        self.interface_info = await self.vpp.vpp_interface_info(self.if_index)
-
-        # Give out addresses from the first prefix configured on the interface
-        self.prefix = self.interface_info.ip6[0].network
-
-        logger.debug("Interface info: %s", self.interface_info)
-        logger.debug("Serving, prefix: %s on interface %s", self.prefix, self.if_name)
-
-        # Create a DUID-LL with the MAC address
-        self.duid = DUID_LL(lladdr=self.interface_info.mac)
+        for if_name in self.if_names:
+            if_index = await self.vpp.vpp_interface_name2index(if_name)
+            logger.debug("Getting interface index for: %s %s", if_name, if_index)
+            self.interface_info[if_index] = await self.vpp.vpp_interface_info(if_index)
+            logger.debug("Interface info: %s", self.interface_info[if_index])
+            logger.debug("Serving, prefix: %s on interface %s", self.interface_info[if_index].ip6[0].network, if_name)
+            # Create a DUID-LL with the MAC address
+            self.interface_info[if_index].duid = DUID_LL(lladdr=self.interface_info[if_index].mac)
 
         # Add a route in the MFIB for the all DHCP servers and relays address
         await self.vpp.vpp_ip_multicast_group_join("ff02::1:2")
@@ -266,7 +262,8 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
 
             # Decode packet with scapy
             packet = VPPPunt(packet)
-            if packet[VPPPunt].iface_index != self.if_index:
+            if_index = packet[VPPPunt].iface_index
+            if if_index not in self.interface_info:
                 logger.error("Received packet on wrong interface %s", packet.show2(dump=True))
                 continue
 
@@ -278,9 +275,11 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
             msgtype = p.msgtype
             trid = p.trid
 
+            interface_info = self.interface_info[if_index]
+
             if packet.haslayer(DHCP6_Solicit):
                 logger.debug("Received DHCPv6 Solicit")
-                reply = self.process_request(packet, trid, msgtype)
+                reply = self.process_request(interface_info, packet, trid, msgtype)
                 # reply = self.process_solicit(packet)
             elif (
                 packet.haslayer(DHCP6_Request)
@@ -289,11 +288,11 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
                 or packet.haslayer(DHCP6_Rebind)
             ):
                 logger.debug("Received DHCPv6 Request, Renew, Rebind")
-                reply = self.process_request(packet, trid, msgtype)
+                reply = self.process_request(interface_info, packet, trid, msgtype)
             elif packet.haslayer(DHCP6_Release):
-                reply = self.process_release(packet, trid)
+                reply = self.process_release(interface_info, packet, trid)
             elif packet.haslayer(DHCP6_Decline):
-                reply = self.process_decline(packet, trid)
+                reply = self.process_decline(interface_info, packet, trid)
             elif packet.haslayer(DHCP6_InfoRequest):
                 logger.info("Received DHCPv6 Information Request")
                 continue

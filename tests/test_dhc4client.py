@@ -9,7 +9,7 @@ from vppdhc.dhc4server import DHC4Server, command_dhcp_binding
 from vppdhc.datamodel import ConfDHC4Client, ConfDHC4Server
 from unittest.mock import MagicMock, Mock, AsyncMock
 from vppdhc.vpppunt import VPPPunt, Actions
-from vppdhc.datamodel import IPv4Interface, VPPInterfaceInfo, IPv6Address, DHC4ClientEvent
+from vppdhc.datamodel import IPv4Interface, VPPInterfaceInfo, IPv6Address, DHC4ClientEvent, Configuration, ConfSystem
 from vppdhc.event_manager import EventManager
 
 def pytest_configure(config):
@@ -55,11 +55,14 @@ async def test_dhc4client() -> None:
 
     event_manager = EventManager()
 
-    client_config = ConfDHC4Client(interface="eth0")
-    server_config = ConfDHC4Server(dns=["8.8.8.8"],
+    dhc4_config = ConfDHC4Client(interface="eth0")
+    client_config = Configuration(system=ConfSystem(log_level="DEBUG", bypass_tenant=2000),
+                                  dhc4client=dhc4_config)
+    server_config = Configuration(system=ConfSystem(log_level="DEBUG", bypass_tenant=2000),
+                                    dhc4server=ConfDHC4Server(dns=["8.8.8.8"],
                                     renewal_time=5,
                                     lease_time=10,
-                                    bypass_tenant=2000)
+                                    bypass_tenant=2000))
 
     vpp = Mock()
     vpp.vpp_interface_name2index = AsyncMock(return_value=42)
