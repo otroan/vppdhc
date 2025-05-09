@@ -43,6 +43,8 @@ from scapy.layers.l2 import Ether  # type: ignore
 from vppdhc.vppdhcdctl import register_command
 from vppdhc.vpppunt import Actions, VPPPunt
 from vppdhc.datamodel import VPPInterfaceInfo
+from vppdhvpp.vppdb import VPPDB, register_vppdb_model
+from pydantic import BaseModel
 
 # Configuration
 # If no configuration is given, the DHCPv6 server will find the prefix(es) configured
@@ -52,6 +54,18 @@ from vppdhc.datamodel import VPPInterfaceInfo
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
+
+@register_vppdb_model("dhc6server")
+class ConfDHC6Server(BaseModel):
+    """DHCPv6 server configuration."""
+
+    interfaces: list[str]
+    preflft: int = 604800
+    validlft: int = 2592000
+    dns: list[IPv6Address]
+    ia_na: bool = True
+    ia_prefix: list[IPv6Network] | None = None
+    ia_allocate_length: int | None = None
 
 
 @register_command("dhcp6", "bindings")

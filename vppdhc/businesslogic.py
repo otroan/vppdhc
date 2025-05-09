@@ -1,11 +1,11 @@
 import logging
 from vppdhc.event_manager import EventManager
-from vppdhc.datamodel import DHC4ClientEvent
+from vppdhc.datamodel import DHC4ClientEvent, Configuration
 
 logger = logging.getLogger(__name__)
 
 class BusinessLogic:
-    def __init__(self, event_manager: EventManager, vpp):
+    def __init__(self, event_manager: EventManager, vpp, conf: Configuration):
         logger.info("Initializing business logic")
         self.vpp = vpp
         self.event_manager = event_manager

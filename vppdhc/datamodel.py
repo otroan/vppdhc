@@ -5,7 +5,7 @@ from enum import IntEnum
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.networks import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface, IPv6Network
 from vpp_papi.macaddress import MACAddress # type: ignore
-
+from vppdhc.vppdb import VPPDB, register_vppdb_model
 
 class VPPInterfaceInfo(BaseModel):
         """VPP Interface information."""
@@ -18,11 +18,7 @@ class VPPInterfaceInfo(BaseModel):
         ip6ll: IPv6Address
         duid: bytes = None
 
-class ConfVPP(BaseModel):
-    """Configuration for VPP."""
-
-    socket: str
-
+@register_vppdb_model("system")
 class ConfSystem(BaseModel):
     """Global configuration."""
 
@@ -31,11 +27,6 @@ class ConfSystem(BaseModel):
     log_level: str = Field(alias="log-level")
     log_file: str = Field(alias="log-file", default=None)
 
-class ConfDHC4Client(BaseModel):
-    """DHCPv4 client configuration."""
-
-    model_config = ConfigDict(populate_by_name=True)
-    interface: str
 
 class DHC4ClientStateMachine(IntEnum):
     """DHCPv4 Client states."""
@@ -55,59 +46,13 @@ class DHC4ClientEvent(BaseModel):
     state: DHC4ClientStateMachine = None
     options: dict = None
 
-class ConfDHC4Server(BaseModel):
-    """DHCPv4 server configuration."""
 
-    model_config = ConfigDict(populate_by_name=True)
-    lease_time: int = Field(alias="lease-time")
-    renewal_time: int = Field(alias="renewal-time")
-    dns: list[IPv4Address]
-    ipv6_only_preferred: bool = Field(alias="ipv6-only-preferred", default=False)
 
-class ConfDHC6Client(BaseModel):
-    """DHCPv6 PD client configuration."""
-
-    model_config = ConfigDict(populate_by_name=True)
-    interface: str
-    ia_pd: bool = True
-    ia_na: bool = False
-
-class ConfDHC6Server(BaseModel):
-    """DHCPv6 server configuration."""
-
-    interfaces: list[str]
-    preflft: int = 604800
-    validlft: int = 2592000
-    dns: list[IPv6Address]
-    ia_na: bool = True
-    ia_prefix: list[IPv6Network] | None = None
-    ia_allocate_length: int | None = None
-
-class ConfIP6NDPrefix(BaseModel):
-    """IPv6 ND prefix information."""
-
-    prefix: IPv6Network
-    L: bool = True
-    A: bool = False
-
-class ConfIP6NDRA(BaseModel):
-    """IPv6 ND RA configuration."""
-
-    interfaces: list[str]
-    pio: ConfIP6NDPrefix = None
-    maxrtradvinterval: int = 600
-    pref64: IPv6Network = None
 
 class Configuration(BaseModel):
     """Configuration model."""
 
     system: ConfSystem = None
-    vpp: ConfVPP = None
-    dhc4client: ConfDHC4Client = None
-    dhc4server: ConfDHC4Server = None
-    dhc6client: ConfDHC6Client = None
-    dhc6server: ConfDHC6Server = None
-    ip6ndra: ConfIP6NDRA = None
 
 
 class DHC6_IAAddr(BaseModel):

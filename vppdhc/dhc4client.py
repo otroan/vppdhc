@@ -13,8 +13,9 @@ from scapy.volatile import RandInt
 
 from vppdhc.datamodel import DHC4ClientEvent, DHC4ClientStateMachine, IPv4Interface, Configuration
 from vppdhc.vpppunt import Actions, VPPPunt
-from vppdhc.event_manager import EventManager
 from vppdhc.vppdhcdctl import register_command
+from vppdhc.vppdb import VPPDB, register_vppdb_model
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
@@ -41,6 +42,12 @@ def options2dict(options: list) -> dict:
         o[op[0]] = op[1]
     return o
 
+@register_vppdb_model("dhc4client")
+class ConfDHC4Client(BaseModel):
+    """DHCPv4 client configuration."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    interface: str
 
 class DHC4Client:
     """DHCPv4 Client."""
@@ -53,14 +60,17 @@ class DHC4Client:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, receive_socket, send_socket, vpp, conf: Configuration, event_manager: EventManager) -> None:
+    def __init__(self, receive_socket, send_socket, vpp, conf: VPPDB) -> None:
         """DHCPv4 Client."""
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
-        self.if_name = conf.dhc4client.interface
-        self.tenant_id = conf.system.bypass_tenant
-        self.event_manager = event_manager
+        self.cdb = conf
+        dhc4_conf = conf.get("/dhc4client")
+        sys_conf = conf.get("/system")
+        print('DHCP4 CLIENT CONFIG', dhc4_conf)
+        self.if_name = dhc4_conf.interface
+        self.tenant_id = sys_conf.bypass_tenant
         self.state = DHC4ClientStateMachine.INIT
         self.binding = None
 
@@ -72,18 +82,15 @@ class DHC4Client:
 
     async def client_set_state(self, newstate: DHC4ClientStateMachine) -> None:
         """Set the client state."""
-        if self.event_manager:
-            await self.event_manager.publish("/dhc4c/state", DHC4ClientEvent(state=newstate))
         self.state = newstate
 
     async def on_lease(self, prefix: IPv4Interface, options: dict) -> None:
         """Send event."""
         self.binding = {"ifindex": self.if_index, "ip": prefix, "state": self.state, "options": options}
 
-        if self.event_manager:
-            await self.event_manager.publish(
-                "/dhc4c/on_lease", DHC4ClientEvent(ifindex=self.if_index, ip=prefix, state=self.state, options=options)
-            )
+        await self.cdb.set(
+            "/dhc4c/on_lease", DHC4ClientEvent(ifindex=self.if_index, ip=prefix, state=self.state, options=options)
+        )
 
     async def client(self) -> None:
         """DHCPv4 Client."""
@@ -94,7 +101,7 @@ class DHC4Client:
         # Add a 3-tuple session so to get DHCP unicast packets
         primary_key = {
             "context_id": 0,
-            "src": "0.0.0.0",
+            "src": "0.0.0.0",  # noqa: S104
             "dst": "255.255.255.255",
             "sport": 0,
             "dport": 68,
@@ -105,6 +112,10 @@ class DHC4Client:
 
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
+
+        # Store references for later cleanup
+        self._reader = reader
+        self._writer = writer
 
         reply = None
         rt = 1  # SOL_TIMEOUT
@@ -232,3 +243,18 @@ class DHC4Client:
                 await self.client_set_state(DHC4ClientStateMachine.INIT)
             else:
                 logger.error("Received unknown message type: %s", options["message-type"])
+
+    async def cleanup(self):
+        """Clean up resources."""
+        if hasattr(self, '_reader'):
+            self._reader.close()
+        if hasattr(self, '_writer'):
+            self._writer.close()
+
+    async def __aenter__(self):
+        """Enter async context."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context."""
+        await self.cleanup()

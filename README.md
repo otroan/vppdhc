@@ -8,6 +8,7 @@ a given interface.
 VPPDHC is a single process, that uses Python asyncio to implement the various functions.
 
 ## DHCPv4 server
+
 The DHCP server is set up to receive all DHCP packets from VPP.
 It will service any interface, by querying VPP for it's interface addressing, and create a pool
 based on that. E.g. if the interface IP address is 192.168.10.1/24. It will create a pool
@@ -20,16 +21,20 @@ Using a larger number of host bits limits the probability of collision. E.g. usi
 Or even the whole of 10/8.
 
 ## DHCPv4 client
-Not yet implemented.
+
+A DHCPv4 client intended to be used on the WAN interface of the CPE.
 
 ## DHCPv6 PD client
+
 A DHCPv6 Prefix Delegation client. Currently only integration with NPTv6 is supported. Whenever a prefix
 is received via DHCPv6 PD, a NPTv6 binding is created with the configured internal prefix.
 
 ## DHCPv6 server
+
 A stateless DHCPv6 server. An address is created based on the client's DUID and IAID, and a single address is assigned to the client. No duplicate detection is performed.
 
 ## RA Advertisement daemon
+
 The RA advertisement daemon is very simple. For the interface(s) it is enabled on, it will advertise an RA
 with the M-flag and the O-flag enabled, and with an empty PIO.
 

@@ -37,8 +37,20 @@ from vppdhc.datamodel import (ConfDHC6Client,
                               DHC6_IAAddr,
                               DHC6_IAPrefix,
 )
+from pydantic import BaseModel, ConfigDict
+from vppdhc.vppdb import VPPDB, register_vppdb_model
+
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
+
+@register_vppdb_model("dhc6client")
+class ConfDHC6Client(BaseModel):
+    """DHCPv6 PD client configuration."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    interface: str
+    ia_pd: bool = True
+    ia_na: bool = False
 
 
 class StateMachine(IntEnum):

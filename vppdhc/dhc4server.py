@@ -13,7 +13,7 @@ from enum import Enum
 from ipaddress import IPv4Address, IPv4Network
 
 import asyncio_dgram
-from pydantic import BaseModel, ConfigDict, conint, field_serializer
+from pydantic import BaseModel, ConfigDict, conint, field_serializer, Field
 from scapy.layers.dhcp import BOOTP, DHCP
 from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
@@ -23,10 +23,20 @@ from scapy.utils import str2mac
 from vppdhc.vppdhcdctl import register_command
 from vppdhc.vpppunt import Actions, VPPPunt
 from vppdhc.datamodel import Configuration
+from vppdhc.vppdb import VPPDB, register_vppdb_model
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
 
+@register_vppdb_model("dhc4server")
+class ConfDHC4Server(BaseModel):
+    """DHCPv4 server configuration."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    lease_time: int = Field(alias="lease-time")
+    renewal_time: int = Field(alias="renewal-time")
+    dns: list[IPv4Address]
+    ipv6_only_preferred: bool = Field(alias="ipv6-only-preferred", default=False)
 
 class DHC4ServerNoIPaddrAvailableError(Exception):
     """No IP address available."""
@@ -136,7 +146,8 @@ class DHC4BindingDatabase(BaseModel):
         return None
 
     @field_serializer("leases")
-    def serialize_leases(self, value: list[IPv4Address] | None) -> str:
+    def serialize_leases(self, value: list[DHC4Lease | None]) -> list[DHC4Lease]:
+        """Filter out None values from leases list."""
         return [lease for lease in value if lease is not None]
 
     def static_ip(self, ip: IPv4Address) -> None:
@@ -364,17 +375,19 @@ class DHC4Server:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, receive_socket, send_socket, vpp, conf: Configuration) -> None:
+    def __init__(self, receive_socket, send_socket, vpp, conf: VPPDB) -> None:
         """DHCPv4 Server."""
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
 
-        self.renewal_time = conf.dhc4server.renewal_time
-        self.lease_time = conf.dhc4server.lease_time
-        self.name_server = conf.dhc4server.dns
-        self.tenant_id = conf.system.bypass_tenant
-        self.ipv6_only_preferred = conf.dhc4server.ipv6_only_preferred
+        dhc4server_conf = conf.get("/dhc4server")
+        system_conf = conf.get("/system")
+        self.renewal_time = dhc4server_conf.renewal_time
+        self.lease_time = dhc4server_conf.lease_time
+        self.name_server = dhc4server_conf.dns
+        self.tenant_id = system_conf.bypass_tenant
+        self.ipv6_only_preferred = dhc4server_conf.ipv6_only_preferred
 
         self.dbs = {}  # DHCPv4 Binding databases
 
@@ -515,53 +528,76 @@ class DHC4Server:
         }
         rv = await self.vpp.vpp_vcdp_session_add(self.tenant_id, primary_key=primary_key)
         logger.debug("VCDP session add: %s", rv)
+        print(f'Receive SOCKET NAME {self.receive_socket}')
 
-        reader = await asyncio_dgram.bind(self.receive_socket)
-        writer = await asyncio_dgram.connect(self.send_socket)
+        try:
+            self._reader = await asyncio_dgram.bind(self.receive_socket)
+            self._writer = await asyncio_dgram.connect(self.send_socket)
 
-        while True:
-            # Receive on uds socket
-            (packet, _) = await reader.recv()
+            while True:
+                # Receive on uds socket
+                (packet, _) = await self._reader.recv()
 
-            # Decode packet with scapy
-            packet = VPPPunt(packet)
-            packet_logger.debug("Received from client: %s", packet.show2(dump=True))
+                # Decode packet with scapy
+                packet = VPPPunt(packet)
+                packet_logger.debug("Received from client: %s", packet.show2(dump=True))
 
-            if not packet.haslayer(BOOTP):
-                packet_logger.error("Packet without bootp %s", packet.show2(dump=True))
-                continue
+                if not packet.haslayer(BOOTP):
+                    packet_logger.error("Packet without bootp %s", packet.show2(dump=True))
+                    continue
 
-            reqb = packet.getlayer(BOOTP)
-            if reqb.op != 1:  # BOOTPREQUEST
-                continue
+                reqb = packet.getlayer(BOOTP)
+                if reqb.op != 1:  # BOOTPREQUEST
+                    continue
 
-            ifindex = packet[VPPPunt].iface_index
-            db = self.dbs.get(ifindex)
-            if db is None:
-                # Create a pool on a given interface
-                interface_info = await self.vpp.vpp_interface_info(ifindex)
+                ifindex = packet[VPPPunt].iface_index
+                db = self.dbs.get(ifindex)
+                if db is None:
+                    # Create a pool on a given interface
+                    interface_info = await self.vpp.vpp_interface_info(ifindex)
 
-                # Create a new DHCPv4 pool based on the interface IP address/subnet
-                db = self.dbs[ifindex] = DHC4BindingDatabase(
-                    ifindex=ifindex,
-                    interface=interface_info.name,
-                    mac_address=interface_info.mac,
-                    server_ip=interface_info.ip4[0].ip,
-                    leases=[],
-                    network=interface_info.ip4[0].network,
-                    dns_servers=self.name_server,
-                    lease_by_client_id={},
-                )
+                    # Create a new DHCPv4 pool based on the interface IP address/subnet
+                    db = self.dbs[ifindex] = DHC4BindingDatabase(
+                        ifindex=ifindex,
+                        interface=interface_info.name,
+                        mac_address=interface_info.mac,
+                        server_ip=interface_info.ip4[0].ip,
+                        leases=[],
+                        network=interface_info.ip4[0].network,
+                        dns_servers=self.name_server,
+                        lease_by_client_id={},
+                    )
 
-                # Add a 3-tuple session so to get DHCP unicast packets
-                await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
+                    # Add a 3-tuple session so to get DHCP unicast packets
+                    await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
 
-            reply = await self.process_packet(db, packet)
-            if not reply:
-                logger.notice("Process packet failed. No reply")
-                continue
+                reply = await self.process_packet(db, packet)
+                if not reply:
+                    logger.notice("Process packet failed. No reply")
+                    continue
 
-            reply = VPPPunt(iface_index=ifindex, action=Actions.PUNT_L2) / reply
-            packet_logger.debug("Sending to %s: %s", interface_info.mac, reply.show2(dump=True))
+                reply = VPPPunt(iface_index=ifindex, action=Actions.PUNT_L2) / reply
+                packet_logger.debug("Sending to %s: %s", interface_info.mac, reply.show2(dump=True))
 
-            await writer.send(bytes(reply))
+                await writer.send(bytes(reply))
+        except asyncio.CancelledError:
+            # Handle cancellation
+            raise
+        finally:
+            # Always clean up resources
+            await self.cleanup()
+
+    async def cleanup(self):
+        """Clean up resources."""
+        if hasattr(self, '_reader'):
+            self._reader.close()
+        if hasattr(self, '_writer'):
+            self._writer.close()
+
+    async def __aenter__(self):
+        """Enter async context."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context."""
+        await self.cleanup()

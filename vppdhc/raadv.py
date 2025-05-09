@@ -10,12 +10,30 @@ from scapy.layers.inet6 import IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, ICMPv6ND
 
 import asyncio_dgram
 from vppdhc.vpppunt import VPPPunt, Actions
-
+from vppdhc.vppdb import VPPDB, register_vppdb_model
+from pydantic import BaseModel
+from ipaddress import IPv6Network
 
 # TODO: Add support for sending on multiple interfaces
 # TODO: Support SLAAC. Pick up prefix from interface
 
 logger = logging.getLogger(__name__)
+
+class ConfIP6NDPrefix(BaseModel):
+    """IPv6 ND prefix information."""
+
+    prefix: IPv6Network
+    L: bool = True
+    A: bool = False
+
+@register_vppdb_model("ip6ndra")
+class ConfIP6NDRA(BaseModel):
+    """IPv6 ND RA configuration."""
+
+    interfaces: list[str]
+    pio: list[ConfIP6NDPrefix] = None
+    maxrtradvinterval: int = 600
+    pref64: IPv6Network = None
 
 class IP6NDRA:
     def __init__(self, receive_socket, send_socket, vpp, configuration):

@@ -16,9 +16,17 @@ from scapy.layers.l2 import Ether
 from vpp_papi.vpp_papi_async import VPPApiClient, VppEnum
 from vppdhc.datamodel import VPPInterfaceInfo
 from ipaddress import IPv6Network, IPv4Address, IPv6Address, ip_address
+from vppdhc.vppdb import VPPDB, register_vppdb_model
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 logging.getLogger("vpp_papi").setLevel(logging.ERROR)
+
+@register_vppdb_model("vpp")
+class ConfVPP(BaseModel):
+    """Configuration for VPP."""
+
+    socket: str
 
 
 class VPPDHCException(Exception):
