@@ -1,22 +1,27 @@
 import logging
-from vppdhc.event_manager import EventManager
-from vppdhc.datamodel import DHC4ClientEvent, Configuration
+
+from vppdhc.datamodel import Configuration, DHC4ClientEvent
+from vppdhc.vppdb import VPPDB
 
 logger = logging.getLogger(__name__)
 
+
 class BusinessLogic:
-    def __init__(self, event_manager: EventManager, vpp, conf: Configuration):
+    def __init__(self, vpp, conf: Configuration):
         logger.info("Initializing business logic")
         self.vpp = vpp
-        self.event_manager = event_manager
-        self.event_manager.subscribe("/dhc4c/on_lease", self.dhc4_on_lease)
-        self.event_manager.subscribe("/dhc6c/on_lease", self.dhc6_on_lease)
+        # Set up the configuration database
+        self.cdb = VPPDB()
 
-    async def dhc6_on_lease(self, data):
+        # Subscribe to events using VPPDB
+        self.cdb.subscribe("/ops/dhc4c/lease", self.dhc4_on_lease)
+        self.cdb.subscribe("/ops/dhc6c/lease", self.dhc6_on_lease)
+
+    def dhc6_on_lease(self, data):
         """DHCPv6 on lease event."""
         logger.info("DHCPv6 on lease: %s", data)
 
-        '''
+        """
                         # Delete old binding if it exists
                         rv = self.vpp.api.npt66_binding_add_del(
                             is_add=False,
@@ -42,9 +47,9 @@ class BusinessLogic:
                 # and we have a blackhole route for the internal prefix instead.
                 if not self.npt66:
                     rv = self.vpp.vpp_ip6_route_add(pdprefix, "::")
-        '''
+        """
 
-    async def dhc4_on_lease(self, data: DHC4ClientEvent) -> None:
+    def dhc4_on_lease(self, data: DHC4ClientEvent) -> None:
         """DHCPv4 on lease event."""
         logger.info("DHCPv4 on lease: %s", data)
 

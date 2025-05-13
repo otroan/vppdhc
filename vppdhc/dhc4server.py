@@ -8,25 +8,24 @@
 import hashlib
 import logging
 import time
-from asyncio import Task
 from enum import Enum
 from ipaddress import IPv4Address, IPv4Network
 
 import asyncio_dgram
-from pydantic import BaseModel, ConfigDict, conint, field_serializer, Field
+from pydantic import BaseModel, ConfigDict, Field, conint, field_serializer
 from scapy.layers.dhcp import BOOTP, DHCP
 from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
 from scapy.packet import Packet
 from scapy.utils import str2mac
 
+from vppdhc.vppdb import VPPDB, register_vppdb_model
 from vppdhc.vppdhcdctl import register_command
 from vppdhc.vpppunt import Actions, VPPPunt
-from vppdhc.datamodel import Configuration
-from vppdhc.vppdb import VPPDB, register_vppdb_model
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
+
 
 @register_vppdb_model("dhc4server")
 class ConfDHC4Server(BaseModel):
@@ -37,6 +36,7 @@ class ConfDHC4Server(BaseModel):
     renewal_time: int = Field(alias="renewal-time")
     dns: list[IPv4Address]
     ipv6_only_preferred: bool = Field(alias="ipv6-only-preferred", default=False)
+
 
 class DHC4ServerNoIPaddrAvailableError(Exception):
     """No IP address available."""
@@ -176,7 +176,10 @@ class DHC4BindingDatabase(BaseModel):
         # Reserve the first 10% of a prefix to manually configured addresses up to 256 addresses
         reserved = min(int(self.network.num_addresses / 10), 256)
         logger.debug(
-            "Creating new DHCP binding database for: %s %s reserved %d", self.interface, self.network, reserved
+            "Creating new DHCP binding database for: %s %s reserved %d",
+            self.interface,
+            self.network,
+            reserved,
         )
         reserved_addresses = list(self.network)[:reserved]
         for ip in reserved_addresses:
@@ -439,7 +442,10 @@ class DHC4Server:
                     # Someone else won
                     db.free_lease(client_id)
                     logger.error(
-                        "*** ERROR Unknown server id %s expected %s from %s ***", server_id, dhcp_server_ip, chaddrstr
+                        "*** ERROR Unknown server id %s expected %s from %s ***",
+                        server_id,
+                        dhcp_server_ip,
+                        chaddrstr,
                     )
                     return None
 
@@ -528,7 +534,7 @@ class DHC4Server:
         }
         rv = await self.vpp.vpp_vcdp_session_add(self.tenant_id, primary_key=primary_key)
         logger.debug("VCDP session add: %s", rv)
-        print(f'Receive SOCKET NAME {self.receive_socket}')
+        print(f"Receive SOCKET NAME {self.receive_socket}")
 
         try:
             self._reader = await asyncio_dgram.bind(self.receive_socket)
@@ -579,7 +585,7 @@ class DHC4Server:
                 reply = VPPPunt(iface_index=ifindex, action=Actions.PUNT_L2) / reply
                 packet_logger.debug("Sending to %s: %s", interface_info.mac, reply.show2(dump=True))
 
-                await writer.send(bytes(reply))
+                await self._writer.send(bytes(reply))
         except asyncio.CancelledError:
             # Handle cancellation
             raise
@@ -589,9 +595,9 @@ class DHC4Server:
 
     async def cleanup(self):
         """Clean up resources."""
-        if hasattr(self, '_reader'):
+        if hasattr(self, "_reader"):
             self._reader.close()
-        if hasattr(self, '_writer'):
+        if hasattr(self, "_writer"):
             self._writer.close()
 
     async def __aenter__(self):

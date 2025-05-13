@@ -43,9 +43,20 @@ authors = [
 ]
 readme = "README.md"
 
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=3.6.0",
+]
+
 [project.urls]
 repository = "https://github.com/nataasvpp/dhcp"
 
 [project.scripts]
 vppdhcd = "vppdhc.main:app"
 vppdhcctl = "vppdhc.vppdhcctl:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py", "tests.py"]
+addopts = "--ignore=tests/test_vpppunt.py"
+asyncio_mode = "auto"

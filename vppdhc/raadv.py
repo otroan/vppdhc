@@ -1,23 +1,23 @@
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
-import time
-import logging
 import asyncio
-from typing import Any
-from enum import IntEnum
-from scapy.layers.l2 import Ether
-from scapy.layers.inet6 import IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, ICMPv6NDOptPrefixInfo, ICMPv6NDOptPREF64
+import logging
+import time
+from ipaddress import IPv6Network
 
 import asyncio_dgram
-from vppdhc.vpppunt import VPPPunt, Actions
-from vppdhc.vppdb import VPPDB, register_vppdb_model
 from pydantic import BaseModel
-from ipaddress import IPv6Network
+from scapy.layers.inet6 import ICMPv6ND_RA, ICMPv6NDOptPREF64, ICMPv6NDOptPrefixInfo, ICMPv6NDOptSrcLLAddr, IPv6
+from scapy.layers.l2 import Ether
+
+from vppdhc.vppdb import register_vppdb_model
+from vppdhc.vpppunt import Actions, VPPPunt
 
 # TODO: Add support for sending on multiple interfaces
 # TODO: Support SLAAC. Pick up prefix from interface
 
 logger = logging.getLogger(__name__)
+
 
 class ConfIP6NDPrefix(BaseModel):
     """IPv6 ND prefix information."""
@@ -25,6 +25,7 @@ class ConfIP6NDPrefix(BaseModel):
     prefix: IPv6Network
     L: bool = True
     A: bool = False
+
 
 @register_vppdb_model("ip6ndra")
 class ConfIP6NDRA(BaseModel):
@@ -34,6 +35,7 @@ class ConfIP6NDRA(BaseModel):
     pio: list[ConfIP6NDPrefix] = None
     maxrtradvinterval: int = 600
     pref64: IPv6Network = None
+
 
 class IP6NDRA:
     def __init__(self, receive_socket, send_socket, vpp, configuration):
@@ -105,7 +107,7 @@ class IP6NDRA:
                 solicit, _ = await asyncio.wait_for(reader.recv(), timeout=next_periodic)
                 logger.debug(f"WAITED in receive {time.time() - now}")
                 next_periodic -= time.time() - now
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.debug(f"Timeout {waited}")
                 solicit = None
                 next_periodic = self.rt

@@ -6,9 +6,10 @@ import asyncio
 import logging
 import random
 from enum import IntEnum
-from ipaddress import IPv6Network, IPv6Address
+from ipaddress import IPv6Address, IPv6Network
 
 import asyncio_dgram
+from pydantic import BaseModel, ConfigDict
 from scapy.layers.dhcp6 import (
     DUID_LL,
     DHCP6_Advertise,
@@ -19,8 +20,8 @@ from scapy.layers.dhcp6 import (
     DHCP6OptClientId,
     DHCP6OptIA_NA,
     DHCP6OptIA_PD,
-    DHCP6OptIAPrefix,
     DHCP6OptIAAddress,
+    DHCP6OptIAPrefix,
     DHCP6OptServerId,
     DHCP6OptStatusCode,
 )
@@ -28,20 +29,19 @@ from scapy.layers.inet6 import UDP, IPv6
 from scapy.layers.l2 import Ether
 from scapy.packet import Packet
 
-from vppdhc.event_manager import EventManager
-from vppdhc.vpppunt import Actions, VPPPunt
-from vppdhc.datamodel import (ConfDHC6Client,
-                              DHC6ClientBinding,
-                              DHC6_IAPD,
-                              DHC6_IANA,
-                              DHC6_IAAddr,
-                              DHC6_IAPrefix,
+from vppdhc.datamodel import (
+    DHC6_IANA,
+    DHC6_IAPD,
+    DHC6_IAAddr,
+    DHC6_IAPrefix,
+    DHC6ClientBinding,
 )
-from pydantic import BaseModel, ConfigDict
 from vppdhc.vppdb import VPPDB, register_vppdb_model
+from vppdhc.vpppunt import Actions, VPPPunt
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
+
 
 @register_vppdb_model("dhc6client")
 class ConfDHC6Client(BaseModel):
@@ -67,14 +67,22 @@ class StateMachine(IntEnum):
 class DHC6Client:
     """DHCPv6 Client."""
 
-    def __init__(self, receive_socket, send_socket, vpp, conf, event_manager: EventManager):
+    def __init__(self, receive_socket, send_socket, vpp, conf: VPPDB):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
-        self.if_name = conf.interface
-        self.ia_pd = conf.ia_pd
-        self.ia_na = conf.ia_na
-        self.event_manager = event_manager
+        self.cdb = conf
+
+        dhc6_conf = conf.get("/dhc6client")
+        sys_conf = conf.get("/system")
+        print("DHCP6 CLIENT CONFIG", dhc6_conf)
+        self.if_name = dhc6_conf.interface
+        self.tenant_id = sys_conf.bypass_tenant
+        self.state = StateMachine.INIT
+        self.binding = None
+
+        self.ia_pd = dhc6_conf.ia_pd
+        self.ia_na = dhc6_conf.ia_na
 
         self.bindings = {}
 
@@ -97,6 +105,14 @@ class DHC6Client:
             else:
                 return False
         return True
+
+    async def on_lease(self, bindings: DHC6ClientBinding) -> None:
+        """Send event."""
+        try:
+            self.cdb.set("/ops/dhc6c/lease", bindings)
+        except Exception as e:
+            logger.exception("Error setting lease: %s", e)
+            raise
 
     async def process_reply(self, reply: Packet) -> None:
         """Process a DHCPv6 reply packet."""
@@ -129,7 +145,7 @@ class DHC6Client:
             )
 
         self.bindings = DHC6ClientBinding(ia_pd=[iapd], ia_na=[iana], macsrc=macsrc, nexthop=nexthop)
-        await self.event_manager.publish("/dhc6c/on_lease", self.bindings)
+        await self.on_lease(self.bindings)
 
         return rt
 
@@ -255,6 +271,21 @@ class DHC6Client:
                 else:
                     try:
                         rt = await self.process_reply(reply)
-                    except Exception as e:
+                    except Exception:
                         logger.exception("Error processing reply")
                         await asyncio.sleep(rt)
+
+    async def cleanup(self) -> None:
+        """Clean up resources."""
+        if hasattr(self, "_reader"):
+            self._reader.close()
+        if hasattr(self, "_writer"):
+            self._writer.close()
+
+    async def __aenter__(self) -> "DHC6Client":
+        """Enter async context."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit async context."""
+        await self.cleanup()

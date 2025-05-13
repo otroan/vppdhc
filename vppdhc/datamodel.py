@@ -3,20 +3,22 @@
 from enum import IntEnum
 
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic.networks import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface, IPv6Network
-from vpp_papi.macaddress import MACAddress # type: ignore
-from vppdhc.vppdb import VPPDB, register_vppdb_model
+from pydantic.networks import IPv4Interface, IPv6Address, IPv6Network
+
+from vppdhc.vppdb import register_vppdb_model
+
 
 class VPPInterfaceInfo(BaseModel):
-        """VPP Interface information."""
+    """VPP Interface information."""
 
-        ifindex: int
-        name: str
-        mac: bytes
-        ip4: list[IPv4Interface]
-        ip6: list[IPv6Address]
-        ip6ll: IPv6Address
-        duid: bytes = None
+    ifindex: int
+    name: str
+    mac: bytes
+    ip4: list[IPv4Interface]
+    ip6: list[IPv6Address]
+    ip6ll: IPv6Address
+    duid: bytes = None
+
 
 @register_vppdb_model("system")
 class ConfSystem(BaseModel):
@@ -38,6 +40,7 @@ class DHC4ClientStateMachine(IntEnum):
     RENEWING = 4
     RELEASING = 5
 
+
 class DHC4ClientEvent(BaseModel):
     """DHCPv4 client event."""
 
@@ -45,8 +48,6 @@ class DHC4ClientEvent(BaseModel):
     ip: IPv4Interface = None
     state: DHC4ClientStateMachine = None
     options: dict = None
-
-
 
 
 class Configuration(BaseModel):
@@ -62,6 +63,7 @@ class DHC6_IAAddr(BaseModel):
     preferred: int
     valid: int
 
+
 class DHC6_IANA(BaseModel):
     """OPTION_IA_NA."""
 
@@ -70,12 +72,15 @@ class DHC6_IANA(BaseModel):
     T2: int
     addresses: list[DHC6_IAAddr]
 
+
 class DHC6_IAPrefix(BaseModel):
     """OPTION_IAPREFIX."""
 
     prefix: IPv6Network
     preferred: int
     valid: int
+
+
 class DHC6_IAPD(BaseModel):
     """OPTION_IA_PD."""
 
@@ -83,10 +88,12 @@ class DHC6_IAPD(BaseModel):
     T1: int
     T2: int
     prefixes: list[DHC6_IAPrefix]
+
+
 class DHC6ClientBinding(BaseModel):
     """DHCPv6 client binding."""
 
-    ia_pd: list[DHC6_IAPD]|None
-    ia_na: list[DHC6_IANA]|None
+    ia_pd: list[DHC6_IAPD] | None
+    ia_na: list[DHC6_IANA] | None
     macsrc: bytes
     nexthop: IPv6Address

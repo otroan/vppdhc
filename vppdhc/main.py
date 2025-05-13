@@ -1,6 +1,4 @@
-"""
-The main module for the VPPDHC daemon.
-"""
+"""The main module for the VPPDHC daemon."""
 
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
@@ -12,13 +10,12 @@ import sys
 import typer
 
 from vppdhc._version import __version__
+from vppdhc.businesslogic import BusinessLogic
 from vppdhc.datamodel import Configuration
 from vppdhc.dhc4client import DHC4Client
 from vppdhc.dhc4server import DHC4Server
 from vppdhc.dhc6client import DHC6Client
 from vppdhc.dhc6server import DHC6Server
-from vppdhc.event_manager import EventManager
-from vppdhc.businesslogic import BusinessLogic
 from vppdhc.raadv import IP6NDRA
 from vppdhc.vppdhcdctl import VPPDHCD
 from vppdhc.vpppunt import VPP, VppEnum
@@ -34,7 +31,7 @@ def version_callback(value: bool):
         raise typer.Exit
 
 
-async def setup_tasks(tg, conf, vpp, event_manager) -> list:
+async def setup_tasks(tg, conf, vpp) -> list:
     """Set up the tasks."""
     tasks = []
     # Initialise the control socket
@@ -51,10 +48,12 @@ async def setup_tasks(tg, conf, vpp, event_manager) -> list:
     if conf.dhc4client:
         logger.debug("Starting DHCPv4 client")
         socket, vpp_socket = await vpp.vpp_socket_register(
-            VppEnum.vl_api_address_family_t.ADDRESS_IP4, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 68
+            VppEnum.vl_api_address_family_t.ADDRESS_IP4,
+            VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+            68,
         )
 
-        dhc4_client = DHC4Client(socket, vpp_socket, vpp, conf, event_manager)
+        dhc4_client = DHC4Client(socket, vpp_socket, vpp, conf)
         t = tg.create_task(dhc4_client.client())
         tasks.append(t)
 
@@ -62,7 +61,9 @@ async def setup_tasks(tg, conf, vpp, event_manager) -> list:
     if conf.dhc4server:
         logger.debug("Starting DHCPv4 server")
         socket, vpp_socket = await vpp.vpp_socket_register(
-            VppEnum.vl_api_address_family_t.ADDRESS_IP4, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 67
+            VppEnum.vl_api_address_family_t.ADDRESS_IP4,
+            VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+            67,
         )
 
         dhc4_server = DHC4Server(socket, vpp_socket, vpp, conf)
@@ -73,10 +74,12 @@ async def setup_tasks(tg, conf, vpp, event_manager) -> list:
     if conf.dhc6client:
         logger.debug("Starting DHCPv6 client")
         socket, vpp_socket = await vpp.vpp_socket_register(
-            VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 546
+            VppEnum.vl_api_address_family_t.ADDRESS_IP6,
+            VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+            546,
         )  # pylint: disable=no-member
 
-        dhc6_client = DHC6Client(socket, vpp_socket, vpp, conf.dhc6client, event_manager)
+        dhc6_client = DHC6Client(socket, vpp_socket, vpp, conf)
         t = tg.create_task(dhc6_client.client())
         tasks.append(t)
 
@@ -84,7 +87,9 @@ async def setup_tasks(tg, conf, vpp, event_manager) -> list:
     if conf.dhc6server:
         logger.debug("Starting DHCPv6 server")
         socket, vpp_socket = await vpp.vpp_socket_register(
-            VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP, 547
+            VppEnum.vl_api_address_family_t.ADDRESS_IP6,
+            VppEnum.vl_api_ip_proto_t.IP_API_PROTO_UDP,
+            547,
         )  # pylint: disable=no-member
         try:
             dhc6_server = DHC6Server(socket, vpp_socket, vpp, conf.dhc6server)
@@ -99,7 +104,9 @@ async def setup_tasks(tg, conf, vpp, event_manager) -> list:
         logger.debug("Starting RA advertisement daemon")
         # Get router solicitations
         socket, vpp_socket = await vpp.vpp_socket_register(
-            VppEnum.vl_api_address_family_t.ADDRESS_IP6, VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6, 133
+            VppEnum.vl_api_address_family_t.ADDRESS_IP6,
+            VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6,
+            133,
         )  # pylint: disable=no-member
         ra_server = IP6NDRA(socket, vpp_socket, vpp, conf.ip6ndra)
         t = tg.create_task(ra_server.listen())
@@ -110,22 +117,23 @@ async def setup_tasks(tg, conf, vpp, event_manager) -> list:
 
 async def main_coroutine(validatedconf) -> None:
     import traceback
-    event_manager = EventManager()
+
     vpp = None
     if validatedconf.vpp:
         vpp = await VPP.create()
 
-    _ = BusinessLogic(event_manager, vpp)
+    _ = BusinessLogic(vpp, validatedconf)
 
     try:
         async with asyncio.TaskGroup() as tg:
-            tasks = await setup_tasks(tg, validatedconf, vpp, event_manager)
+            tasks = await setup_tasks(tg, validatedconf, vpp)
     except ExceptionGroup as eg:
         print(f"ExceptionGroup caught: {eg}")
         for exc in eg.exceptions:
             print(f"Task exception: {exc}")
             print("Traceback:")
             traceback.print_exception(type(exc), exc, exc.__traceback__)
+
 
 @app.command()
 def main(

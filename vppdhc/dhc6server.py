@@ -1,19 +1,17 @@
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
-"""
-Stateless DHCPv6 IA_NA Server
-"""
+"""Stateless DHCPv6 IA_NA Server"""
 
 # TODO
 # Don't use interface information in configuration.
 # Dynamically create a pool for any interface
 #
-import random
 import hashlib
 import logging
 from ipaddress import IPv6Address, IPv6Network
 
 import asyncio_dgram  # type: ignore
+from pydantic import BaseModel
 from scapy.all import Packet  # type: ignore
 from scapy.layers.dhcp6 import (  # type: ignore
     DHCP6,
@@ -40,11 +38,10 @@ from scapy.layers.dhcp6 import (  # type: ignore
 from scapy.layers.inet6 import UDP, IPv6  # type: ignore
 from scapy.layers.l2 import Ether  # type: ignore
 
+from vppdhc.datamodel import VPPInterfaceInfo
+from vppdhc.vppdb import VPPDB, register_vppdb_model
 from vppdhc.vppdhcdctl import register_command
 from vppdhc.vpppunt import Actions, VPPPunt
-from vppdhc.datamodel import VPPInterfaceInfo
-from vppdhvpp.vppdb import VPPDB, register_vppdb_model
-from pydantic import BaseModel
 
 # Configuration
 # If no configuration is given, the DHCPv6 server will find the prefix(es) configured
@@ -54,6 +51,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
+
 
 @register_vppdb_model("dhc6server")
 class ConfDHC6Server(BaseModel):
@@ -85,22 +83,24 @@ def command_dhcp6_binding(args=None) -> str:
 class DHC6Server:  # pylint: disable=too-many-instance-attributes
     """DHCPv6 Server."""
 
-    def __init__(self, receive_socket, send_socket, vpp, conf):
+    def __init__(self, receive_socket, send_socket, vpp, conf: VPPDB):
         self.receive_socket = receive_socket
         self.send_socket = send_socket
         self.vpp = vpp
 
-        self.if_names = conf.interfaces
+        dhc6_conf = conf.get("/dhc6server")
+
+        self.if_names = dhc6_conf.interfaces
         self.interface_info = {}
         self.duids = {}
 
-        self.preflft = conf.preflft
-        self.validlft = conf.validlft
-        self.dns = conf.dns
-        self.ia_pd = bool(conf.ia_prefix)
-        self.ia_prefix = conf.ia_prefix[0]
-        self.pd_allocate_length = conf.ia_allocate_length
-        self.ia_na = conf.ia_na
+        self.preflft = dhc6_conf.preflft
+        self.validlft = dhc6_conf.validlft
+        self.dns = dhc6_conf.dns
+        self.ia_pd = bool(dhc6_conf.ia_prefix)
+        self.ia_prefix = dhc6_conf.ia_prefix[0]
+        self.pd_allocate_length = dhc6_conf.ia_allocate_length
+        self.ia_na = dhc6_conf.ia_na
         self.prefix_leases = {}
 
     def mk_address(self, interface_info: VPPInterfaceInfo, clientduid, iaid) -> IPv6Address:
@@ -150,7 +150,7 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
             else:
                 packet_logger.error("Received DHCPv6 solicit with IA_NA %s", request.show(dump=True))
                 reply /= DHCP6OptIA_NA(
-                    ianaopts=DHCP6OptStatusCode(statuscode=2, statusmsg="Why do you think we support IA_NA here?")
+                    ianaopts=DHCP6OptStatusCode(statuscode=2, statusmsg="Why do you think we support IA_NA here?"),
                 )
 
         if self.ia_pd:
@@ -164,14 +164,17 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
                     iaid=iaid,
                     T1=t1,
                     T2=t2,
-                    iapdopt=DHCP6OptIAPrefix(prefix=ipv6.network_address,
-                                             plen=ipv6.prefixlen,
-                                             preflft=self.preflft, validlft=self.validlft),
+                    iapdopt=DHCP6OptIAPrefix(
+                        prefix=ipv6.network_address,
+                        plen=ipv6.prefixlen,
+                        preflft=self.preflft,
+                        validlft=self.validlft,
+                    ),
                 )
             else:
                 packet_logger.error("Received DHCPv6 solicit with IA_PD %s", request.show(dump=True))
                 reply /= DHCP6OptIA_PD(
-                    iapdopt=DHCP6OptStatusCode(statuscode=6, statusmsg="Why do you think we support PD here?")
+                    iapdopt=DHCP6OptStatusCode(statuscode=6, statusmsg="Why do you think we support PD here?"),
                 )
 
         return VPPPunt(iface_index=request[VPPPunt].iface_index, action=Actions.PUNT_L2) / reply
@@ -317,3 +320,18 @@ class DHC6Server:  # pylint: disable=too-many-instance-attributes
 
             if reply:
                 await writer.send(bytes(reply))
+
+    async def cleanup(self) -> None:
+        """Clean up resources."""
+        if hasattr(self, "_reader"):
+            self._reader.close()
+        if hasattr(self, "_writer"):
+            self._writer.close()
+
+    async def __aenter__(self) -> "DHC6Server":
+        """Enter async context."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit async context."""
+        await self.cleanup()

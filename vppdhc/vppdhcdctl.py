@@ -8,15 +8,19 @@ logger = logging.getLogger(__name__)
 
 command_registry = {}
 
+
 def register_command(module: str, command: str) -> callable:
     """Register a command decorator."""
     logger.debug("Registering command: %s %s", module, command)
+
     def decorator(func: callable) -> callable:
         if module not in command_registry:
             command_registry[module] = {}
         command_registry[module][command] = func
         return func
+
     return decorator
+
 
 async def handle_client(reader, writer) -> None:
     """Handle a client."""
@@ -36,6 +40,7 @@ async def handle_client(reader, writer) -> None:
 
     writer.close()
     await writer.wait_closed()
+
 
 class VPPDHCD:
     """VPPDHCD Control Daemon."""

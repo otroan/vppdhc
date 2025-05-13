@@ -1,46 +1,49 @@
 import asyncio
-import asyncio_dgram
-import pytest
 import logging
 from ipaddress import IPv6Network
-from scapy.all import Ether, IP, UDP, BOOTP, DHCP
-from random import randint
-from vppdhc.dhc6client import DHC6Client
-from vppdhc.dhc6server import DHC6Server, command_dhcp6_binding
-from unittest.mock import MagicMock, Mock, AsyncMock
-from vppdhc.vpppunt import VPPPunt, Actions
-from vppdhc.datamodel import IPv6Interface, VPPInterfaceInfo, IPv6Address, ConfDHC6Client, ConfDHC6Server
-from vppdhc.event_manager import EventManager
-from vppdhc.businesslogic import BusinessLogic
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+from pydantic.networks import IPv6Interface
+
+from vppdhc.datamodel import (
+    ConfSystem,
+    IPv6Address,
+    VPPInterfaceInfo,
+)
+from vppdhc.dhc6client import ConfDHC6Client, DHC6Client
+from vppdhc.dhc6server import ConfDHC6Server, DHC6Server, command_dhcp6_binding
+from vppdhc.vppdb import VPPDB
+
 
 def pytest_configure(config):
     # Set the asyncio loop scope for this test file only
     config.option.asyncio_default_fixture_loop_scope = "session"  # Options: function, module, or session
 
 
+# Create an asyncio.Event to signal when the lease is received
+lease_event = asyncio.Event()
+
+
 # state = DHCP4ClientStateMachine.INIT
 # expected_state = DHCP4ClientStateMachine.REQUESTING
-async def on_lease(event):
+def on_lease(key, event):
     print(f"Lease event: {event}")
+    lease_event.set()  # Signal that the lease has been received
 
 
-async def state(event):
+def state(event):
     print(f"Client state: {event}")
 
 
-async def dhcp_core_test(event_manager, client_task, server_task):
-    event_manager.subscribe("/dhc6client/on_lease", on_lease)
-    event_manager.subscribe("/dhc6client/state", state)
-    await asyncio.sleep(7)
+async def dhcp_core_test(client_task, server_task):
+    await lease_event.wait()
 
     s = command_dhcp6_binding()
     print("BINDINGS", s)
 
-    print("SHUTTING DOWN    ")
-    server_task.cancel()
-    client_task.cancel()
 
-interfaceinfo={}
+interfaceinfo = {}
 interfaceinfo[42] = VPPInterfaceInfo(
     ifindex=42,
     name="eth0",
@@ -58,11 +61,14 @@ interfaceinfo[43] = VPPInterfaceInfo(
     ip6ll=IPv6Address("fe80::2"),
 )
 
+
 def mock_interface_info(ifindex):
     return interfaceinfo[ifindex]
 
+
 def mock_name2index(name):
     return 42 if name == "eth0" else 43
+
 
 @pytest.mark.asyncio
 async def test_dhc6client() -> None:
@@ -74,9 +80,7 @@ async def test_dhc6client() -> None:
     client_socket_path = "\0" + client_socket.name
     server_socket_path = "\0" + server_socket.name
 
-    event_manager = EventManager()
-    client_config = ConfDHC6Client(interface="eth0", ia_pd=True, ia_na=True,
-                                   internal_prefix="fd00::/64", npt66=True)
+    client_config = ConfDHC6Client(interface="eth0", ia_pd=True, ia_na=True, internal_prefix="fd00::/64", npt66=True)
     server_config = ConfDHC6Server(
         interfaces=["eth0", "eth1"],
         dns=["1::1"],
@@ -84,28 +88,53 @@ async def test_dhc6client() -> None:
         ia_prefix=[IPv6Network("2001:DB8::/56")],
         ia_allocate_length=64,
     )
+    system_config = ConfSystem(log_level="DEBUG", bypass_tenant=2000)
+
+    cdb = VPPDB()
+    cdb.set("/dhc6client", client_config)
+    cdb.set("/dhc6server", server_config)
+    cdb.set("/system", system_config)
 
     vpp = Mock()
     vpp.vpp_interface_name2index = AsyncMock(side_effect=mock_name2index)
     vpp.vpp_probe_is_duplicate = AsyncMock(return_value=False)
     vpp.vpp_ip_multicast_group_join = AsyncMock(return_value=None)
-    _ = BusinessLogic(event_manager, vpp)
-
+    # _ = BusinessLogic(event_manager, vpp)
 
     logging.getLogger("vppdhc.dhc6client.packet").setLevel(logging.INFO)
+    logging.getLogger("vppdhc.dhc6server.packet").setLevel(logging.INFO)
 
     vpp.vpp_interface_info = AsyncMock(side_effect=mock_interface_info)
 
-    client = DHC6Client(client_socket_path, server_socket_path, vpp, client_config, event_manager)
-    server = DHC6Server(server_socket_path, client_socket_path, vpp, server_config)
+    # Subscribe to events using VPPDB
+    cdb.subscribe("/ops/dhc6c/lease", on_lease)
+    cdb.subscribe("/ops/dhc6c/state", state)
 
-    logging.getLogger("vppdhc.dhc4client.packet").setLevel(logging.INFO)
-    logging.getLogger("vppdhc.dhc4server.packet").setLevel(logging.INFO)
+    # Modified test to properly handle task cancellation and resource cleanup
+    async with (
+        DHC6Client(client_socket_path, server_socket_path, vpp, cdb) as client,
+        DHC6Server(server_socket_path, client_socket_path, vpp, cdb) as server,
+    ):
+        # Create tasks outside the TaskGroup
+        server_task = asyncio.create_task(server.listen())
+        client_task = asyncio.create_task(client.client())
 
-    async with asyncio.TaskGroup() as tg:
-        server_task = tg.create_task(server.listen())
-        client_task = tg.create_task(client.client())
-        test_task = tg.create_task(dhcp_core_test(event_manager, client_task, server_task))
+        try:
+            # Wait for the test to complete
+            await dhcp_core_test(client, server)
+        finally:
+            # Ensure tasks are cancelled and awaited
+            server_task.cancel()
+            client_task.cancel()
+
+            # Wait for tasks to complete cancellation
+            try:
+                await asyncio.gather(server_task, client_task, return_exceptions=True)
+            except asyncio.CancelledError:
+                pass  # Expected
+
+    print("*** DATA STORE ****")
+    cdb.dump()
 
 
 if __name__ == "__main__":

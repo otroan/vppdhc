@@ -1,26 +1,26 @@
-"""
-This provides a wrapper around the VPP API for punt sockets and multicast
+"""This provides a wrapper around the VPP API for punt sockets and multicast
 It implements the VPP Punt protocol.
 """
 
 # pylint: disable=import-error, invalid-name, logging-fstring-interpolation
 
-import time
-import logging
 import asyncio
+import logging
 from enum import IntEnum
-from collections import namedtuple
-from scapy.packet import Packet, bind_layers
+from ipaddress import IPv6Address, IPv6Network, ip_address
+
+from pydantic import BaseModel
 from scapy.fields import IntEnumField, LEIntField
 from scapy.layers.l2 import Ether
+from scapy.packet import Packet, bind_layers
 from vpp_papi.vpp_papi_async import VPPApiClient, VppEnum
+
 from vppdhc.datamodel import VPPInterfaceInfo
-from ipaddress import IPv6Network, IPv4Address, IPv6Address, ip_address
-from vppdhc.vppdb import VPPDB, register_vppdb_model
-from pydantic import BaseModel
+from vppdhc.vppdb import register_vppdb_model
 
 logger = logging.getLogger(__name__)
 logging.getLogger("vpp_papi").setLevel(logging.ERROR)
+
 
 @register_vppdb_model("vpp")
 class ConfVPP(BaseModel):
@@ -31,8 +31,6 @@ class ConfVPP(BaseModel):
 
 class VPPDHCException(Exception):
     """VPP DHC Exception"""
-
-    pass
 
 
 # Define the action enumeration
@@ -77,7 +75,7 @@ class VPP:
         logger.debug("Connecting to VPP")
         rv = await instance.vpp.connect("vppdhc", instance.event_queue)
         if rv < 0:
-            raise IOError(f"Error connecting to VPP: {rv}")
+            raise OSError(f"Error connecting to VPP: {rv}")
         logger.debug("Connected to VPP")
         rv = await instance.vpp.api.show_version()
         logger.debug(f"VPP version: {rv}")
@@ -137,7 +135,6 @@ class VPP:
 
     async def vpp_ip_route_add(self, prefix, nexthop: ip_address, nh_ifindex=0xFFFFFFFF, table_id=0, src=0):
         """Adds an IPv4|v6 route"""
-
         # Path
         if isinstance(nexthop, IPv6Address):
             proto = VppEnum.vl_api_fib_path_nh_proto_t.FIB_API_PATH_NH_PROTO_IP6
@@ -239,7 +236,10 @@ class VPP:
 
     async def vpp_ip_address(self, ifindex, prefix, add=True):
         return await self.vpp.api.sw_interface_add_del_address(
-            sw_if_index=ifindex, is_add=add, del_all=False, prefix=prefix
+            sw_if_index=ifindex,
+            is_add=add,
+            del_all=False,
+            prefix=prefix,
         )
 
     async def vpp_vcdp_nat_add(self, nat_id, addresses):
@@ -249,9 +249,11 @@ class VPP:
         return await self.vpp.api.vcdp_nat_bind_set_unset(tenant_id=tenant_id, nat_id=nat_id, is_set=is_set)
 
     async def vpp_vcdp_session_add(self, tenant_id, primary_key, secondary_key=None):
-        return await self.vpp.api.vcdp_session_add(tenant_id=tenant_id,
-                                                   primary_key=primary_key,
-                                                   secondary_key=secondary_key)
+        return await self.vpp.api.vcdp_session_add(
+            tenant_id=tenant_id,
+            primary_key=primary_key,
+            secondary_key=secondary_key,
+        )
 
     async def vpp_ip_multicast_group_join(self, group):
         return await self.vpp.api.ip_multicast_group_join(grp_address=group)

@@ -3,24 +3,24 @@
 import asyncio
 import logging
 import random
-from typing import Any
 
 import asyncio_dgram
-from scapy.layers.dhcp import BOOTP, DHCP, DHCPOptions
+from pydantic import BaseModel, ConfigDict
+from scapy.layers.dhcp import BOOTP, DHCP
 from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
 from scapy.volatile import RandInt
 
-from vppdhc.datamodel import DHC4ClientEvent, DHC4ClientStateMachine, IPv4Interface, Configuration
-from vppdhc.vpppunt import Actions, VPPPunt
-from vppdhc.vppdhcdctl import register_command
+from vppdhc.datamodel import DHC4ClientEvent, DHC4ClientStateMachine, IPv4Interface
 from vppdhc.vppdb import VPPDB, register_vppdb_model
-from pydantic import BaseModel, ConfigDict
+from vppdhc.vppdhcdctl import register_command
+from vppdhc.vpppunt import Actions, VPPPunt
 
 logger = logging.getLogger(__name__)
 packet_logger = logging.getLogger(f"{__name__}.packet")
 
 PRL = [1, 3, 108, 121]  # router, subnetmask, ipv6 only, classless static route
+
 
 @register_command("dhc4c", "bindings")
 def command_dhc4c_binding(args=None) -> str:
@@ -32,15 +32,17 @@ def command_dhc4c_binding(args=None) -> str:
     dhc4client = DHC4Client.get_instance()
     return str(dhc4client.binding)
 
+
 # DHCPv4 client
 def options2dict(options: list) -> dict:
     """Get DHCP message type."""
     # Return all options in a dictionary
-    # Using a dict comprehension
     o = {}
     for op in options:
-        o[op[0]] = op[1]
+        if isinstance(op, (list, tuple)) and len(op) >= 2:
+            o[op[0]] = op[1]
     return o
+
 
 @register_vppdb_model("dhc4client")
 class ConfDHC4Client(BaseModel):
@@ -48,6 +50,7 @@ class ConfDHC4Client(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
     interface: str
+
 
 class DHC4Client:
     """DHCPv4 Client."""
@@ -68,7 +71,7 @@ class DHC4Client:
         self.cdb = conf
         dhc4_conf = conf.get("/dhc4client")
         sys_conf = conf.get("/system")
-        print('DHCP4 CLIENT CONFIG', dhc4_conf)
+        print("DHCP4 CLIENT CONFIG", dhc4_conf)
         self.if_name = dhc4_conf.interface
         self.tenant_id = sys_conf.bypass_tenant
         self.state = DHC4ClientStateMachine.INIT
@@ -83,14 +86,24 @@ class DHC4Client:
     async def client_set_state(self, newstate: DHC4ClientStateMachine) -> None:
         """Set the client state."""
         self.state = newstate
+        try:
+            self.cdb.set("/ops/dhc4c/state", newstate)
+        except Exception as e:
+            logger.exception("Error setting state: %s", e)
+            raise
 
     async def on_lease(self, prefix: IPv4Interface, options: dict) -> None:
         """Send event."""
-        self.binding = {"ifindex": self.if_index, "ip": prefix, "state": self.state, "options": options}
+        try:
+            self.binding = {"ifindex": self.if_index, "ip": prefix, "state": self.state, "options": options}
 
-        await self.cdb.set(
-            "/dhc4c/on_lease", DHC4ClientEvent(ifindex=self.if_index, ip=prefix, state=self.state, options=options)
-        )
+            self.cdb.set(
+                "/ops/dhc4c/lease",
+                DHC4ClientEvent(ifindex=self.if_index, ip=prefix, state=self.state, options=options),
+            )
+        except Exception as e:
+            logger.exception("Error sending lease event: %s", e)
+            raise
 
     async def client(self) -> None:
         """DHCPv4 Client."""
@@ -143,7 +156,7 @@ class DHC4Client:
                             ("param_req_list", PRL),
                             ("client_id", b"\x01" + chaddr),
                             "end",
-                        ]
+                        ],
                     )
                 )
                 discover = VPPPunt(iface_index=self.if_index, action=Actions.PUNT_L2) / discover
@@ -244,17 +257,17 @@ class DHC4Client:
             else:
                 logger.error("Received unknown message type: %s", options["message-type"])
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Clean up resources."""
-        if hasattr(self, '_reader'):
+        if hasattr(self, "_reader"):
             self._reader.close()
-        if hasattr(self, '_writer'):
+        if hasattr(self, "_writer"):
             self._writer.close()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "DHC4Client":
         """Enter async context."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit async context."""
         await self.cleanup()
