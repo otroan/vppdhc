@@ -49,7 +49,7 @@ class BusinessLogic:
                     rv = self.vpp.vpp_ip6_route_add(pdprefix, "::")
         """
 
-    def dhc4_on_lease(self, data: DHC4ClientEvent) -> None:
+    async def dhc4_on_lease(self, data: DHC4ClientEvent) -> None:
         """DHCPv4 on lease event."""
         logger.info("DHCPv4 on lease: %s", data)
 
