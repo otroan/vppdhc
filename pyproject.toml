@@ -25,13 +25,13 @@ packages = ['vppdhc']
 [project]
 name = "vppdhc"
 description="A DHCP server for VPP"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 license = {text = "Apache-2.0"}
 dynamic = ["version"]
 dependencies = [
     "pydantic",
     "scapy @ git+https://github.com/secdev/scapy.git",
-    "vpp_papi>=2.3.0",
+    "vpp_papi>=2.3.2",
     "typer",
     "asyncio_dgram",
     "ruff>=0.8.2",
