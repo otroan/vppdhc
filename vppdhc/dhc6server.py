@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 from typing import Any
 from ipaddress import IPv6Address
+from pydantic import BaseModel
 from scapy.layers.l2 import Ether # type: ignore
 from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, # type: ignore
                                 DHCP6_Decline, DHCP6_Rebind,
@@ -19,7 +20,18 @@ from scapy.layers.dhcp6 import (DHCP6, DHCP6_Solicit, DHCP6_Release, # type: ign
                                 DHCP6_InfoRequest)
 from scapy.layers.inet6 import IPv6, UDP # type: ignore
 import asyncio_dgram # type: ignore
+from vppdhc.vppdb import register_vppdb_model
 from vppdhc.vpppunt import VPPPunt, Actions
+
+
+@register_vppdb_model("dhc6server")
+class ConfDHC6Server(BaseModel):
+    """DHCPv6 server configuration."""
+
+    interfaces: list[str]
+    preflft: int = 3600
+    validlft: int = 7200
+    dns: list[IPv6Address] = []
 
 # Configuration
 # If no configuration is given, the DHCPv6 server will find the prefix(es) configured
