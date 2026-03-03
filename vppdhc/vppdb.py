@@ -76,7 +76,7 @@ class VPPDB:
         builder = RootModelBuilder()
         RootModel = builder.get_root_model()
 
-        self.store = RootModel()
+        self.store = model if model is not None else RootModel()
         self.store.ops = {}
         self.subscribers = defaultdict(list)
 

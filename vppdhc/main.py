@@ -11,13 +11,13 @@ import typer
 
 from vppdhc._version import __version__
 from vppdhc.businesslogic import BusinessLogic
-from vppdhc.datamodel import Configuration
 from vppdhc.dhc4client import DHC4Client
 from vppdhc.dhc4server import DHC4Server
 from vppdhc.dhc6client import DHC6Client
 from vppdhc.dhc6server import DHC6Server
 from vppdhc.raadv import IP6NDRA
 from vppdhc.vppdhcdctl import VPPDHCD
+from vppdhc.vppdb import VPPDB, RootModelBuilder
 from vppdhc.vpppunt import VPP, VppEnum
 
 app = typer.Typer()
@@ -45,7 +45,7 @@ async def setup_tasks(tg, conf, vpp) -> list:
         logger.exception("***Error setting up control socket: %s", e)
 
     # DHCPv4 client
-    if conf.dhc4client:
+    if conf.get("/dhc4client"):
         logger.debug("Starting DHCPv4 client")
         socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP4,
@@ -58,7 +58,7 @@ async def setup_tasks(tg, conf, vpp) -> list:
         tasks.append(t)
 
     # DHCPv4 server
-    if conf.dhc4server:
+    if conf.get("/dhc4server"):
         logger.debug("Starting DHCPv4 server")
         socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP4,
@@ -71,7 +71,7 @@ async def setup_tasks(tg, conf, vpp) -> list:
         tasks.append(t)
 
     # DHCPv6 client
-    if conf.dhc6client:
+    if conf.get("/dhc6client"):
         logger.debug("Starting DHCPv6 client")
         socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP6,
@@ -84,7 +84,7 @@ async def setup_tasks(tg, conf, vpp) -> list:
         tasks.append(t)
 
     # DHCPv6 server
-    if conf.dhc6server:
+    if conf.get("/dhc6server"):
         logger.debug("Starting DHCPv6 server")
         socket, vpp_socket = await vpp.vpp_socket_register(
             VppEnum.vl_api_address_family_t.ADDRESS_IP6,
@@ -92,7 +92,7 @@ async def setup_tasks(tg, conf, vpp) -> list:
             547,
         )  # pylint: disable=no-member
         try:
-            dhc6_server = DHC6Server(socket, vpp_socket, vpp, conf.dhc6server)
+            dhc6_server = DHC6Server(socket, vpp_socket, vpp, conf.get("/dhc6server"))
         except Exception as e:
             logger.exception("Error setting up DHCPv6 server: %s", e)
             sys.exit(1)
@@ -100,7 +100,7 @@ async def setup_tasks(tg, conf, vpp) -> list:
         tasks.append(t)
 
     # RA advertisement
-    if conf.ip6ndra:
+    if conf.get("/ip6ndra"):
         logger.debug("Starting RA advertisement daemon")
         # Get router solicitations
         socket, vpp_socket = await vpp.vpp_socket_register(
@@ -108,7 +108,7 @@ async def setup_tasks(tg, conf, vpp) -> list:
             VppEnum.vl_api_ip_proto_t.IP_API_PROTO_ICMP6,
             133,
         )  # pylint: disable=no-member
-        ra_server = IP6NDRA(socket, vpp_socket, vpp, conf.ip6ndra)
+        ra_server = IP6NDRA(socket, vpp_socket, vpp, conf.get("/ip6ndra"))
         t = tg.create_task(ra_server.listen())
         tasks.append(t)
 
@@ -119,7 +119,7 @@ async def main_coroutine(validatedconf) -> None:
     import traceback
 
     vpp = None
-    if validatedconf.vpp:
+    if validatedconf.get("/vpp"):
         vpp = await VPP.create()
 
     _ = BusinessLogic(vpp, validatedconf)
@@ -172,7 +172,9 @@ def main(
 
     conf = json.loads(config.read())
 
-    validatedconf = Configuration(**conf)
+    builder = RootModelBuilder()
+    RootModel = builder.get_root_model()
+    validatedconf = VPPDB(RootModel(**conf))
 
     logger.debug("Configuration %s", validatedconf)
 
