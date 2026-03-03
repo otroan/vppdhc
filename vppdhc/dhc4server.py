@@ -325,7 +325,10 @@ class DHC4BindingDatabase(BaseModel):
         index = get_ip_index(reqip, self.network)
         lease = self.leases[index]
 
-        if lease is None or lease.ip_address != reqip or lease.client_id != client_id:
+        if lease is None:
+            logger.error("Verify or extend lease: no lease found for %s", reqip)
+            return None
+        if lease.ip_address != reqip or lease.client_id != client_id:
             logger.error("Verify or extend lease with wrong IP %s != %s", lease.ip_address, reqip)
             return None
         lease.last_updated = get_epoch()
