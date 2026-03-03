@@ -11,6 +11,8 @@ import time
 from enum import Enum
 from ipaddress import IPv4Address, IPv4Network
 
+import asyncio
+
 import asyncio_dgram
 from pydantic import BaseModel, ConfigDict, Field, conint, field_serializer
 from scapy.layers.dhcp import BOOTP, DHCP
@@ -272,7 +274,7 @@ class DHC4BindingDatabase(BaseModel):
             ip = self.reserve(mac_address, clientid, hostname)
 
             logger.debug("Probing address: %s", ip)
-            r = await vpp.vpp_probe_is_duplicate_async(self.ifindex, clientid, ip)
+            r = await vpp.vpp_probe_is_duplicate(self.ifindex, clientid, ip)
             if not r:
                 break
 
