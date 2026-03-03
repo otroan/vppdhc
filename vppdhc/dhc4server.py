@@ -119,10 +119,6 @@ class DHC4Lease(BaseModel):
         return value.hex()
 
 
-class DHC4ServerNoIPaddrAvailableError(Exception):
-    pass
-
-
 class DHC4BindingDatabase(BaseModel):
     """DHCPv4 Binding database."""
 
@@ -419,8 +415,9 @@ class DHC4Server:
 
         # This DHCP server is always on-link with the client, let's just use the MAC address.
         mac_address = req[Ether].src
+        mac_bytes = bytes.fromhex(mac_address.replace(":", ""))
 
-        client_id = b"0x1" + mac_address if client_id is None else client_id
+        client_id = b"\x01" + mac_bytes if client_id is None else client_id
 
         reqip = IPv4Address(reqip) if reqip else req[IP].src
 
@@ -428,7 +425,7 @@ class DHC4Server:
             # Reserve a new address
             dst_ip = "255.255.255.255"
             try:
-                ip = await db.reserve_with_probe(self.vpp, mac_address, client_id, hostname)
+                ip = await db.reserve_with_probe(self.vpp, mac_bytes, client_id, hostname)
                 logger.debug("DISCOVER: %s: %s", mac_address, ip)
             except DHC4ServerNoIPaddrAvailableError:
                 logger.exception("*** ERROR No IP address available for: %s ***", mac_address)
