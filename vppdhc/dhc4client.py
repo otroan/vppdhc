@@ -73,7 +73,7 @@ class DHC4Client:
         sys_conf = conf.get("/system")
         print("DHCP4 CLIENT CONFIG", dhc4_conf)
         self.if_name = dhc4_conf.interface
-        self.tenant_id = sys_conf.bypass_tenant
+        self.tenant_id = sys_conf.bypass_tenant if sys_conf else 0
         self.state = DHC4ClientStateMachine.INIT
         self.binding = None
 

@@ -393,7 +393,7 @@ class DHC4Server:
         self.renewal_time = dhc4server_conf.renewal_time
         self.lease_time = dhc4server_conf.lease_time
         self.name_server = dhc4server_conf.dns
-        self.tenant_id = system_conf.bypass_tenant
+        self.tenant_id = system_conf.bypass_tenant if system_conf else 0
         self.ipv6_only_preferred = dhc4server_conf.ipv6_only_preferred
 
         self.dbs = {}  # DHCPv4 Binding databases

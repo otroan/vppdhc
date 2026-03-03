@@ -77,7 +77,7 @@ class DHC6Client:
         sys_conf = conf.get("/system")
         print("DHCP6 CLIENT CONFIG", dhc6_conf)
         self.if_name = dhc6_conf.interface
-        self.tenant_id = sys_conf.bypass_tenant
+        self.tenant_id = sys_conf.bypass_tenant if sys_conf else 0
         self.state = StateMachine.INIT
         self.binding = None
 

@@ -25,8 +25,8 @@ class ConfSystem(BaseModel):
     """Global configuration."""
 
     model_config = ConfigDict(populate_by_name=True)
-    bypass_tenant: int = Field(alias="bypass-tenant")
-    log_level: str = Field(alias="log-level")
+    bypass_tenant: int = Field(alias="bypass-tenant", default=0)
+    log_level: str = Field(alias="log-level", default="INFO")
     log_file: str = Field(alias="log-file", default=None)
 
 
