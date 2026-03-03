@@ -529,16 +529,16 @@ class DHC4Server:
     async def listen(self) -> None:
         """Listen for DHCP requests."""
         # Clients send from their unicast address to 255.255.255.255:67
-        primary_key = {
-            "context_id": 0,
-            "src": "0.0.0.0",
-            "dst": "255.255.255.255",
-            "sport": 0,
-            "dport": 67,
-            "proto": 17,
-        }
-        rv = await self.vpp.vpp_vcdp_session_add(self.tenant_id, primary_key=primary_key)
-        logger.debug("VCDP session add: %s", rv)
+        # primary_key = {
+        #     "context_id": 0,
+        #     "src": "0.0.0.0",
+        #     "dst": "255.255.255.255",
+        #     "sport": 0,
+        #     "dport": 67,
+        #     "proto": 17,
+        # }
+        # rv = await self.vpp.vpp_vcdp_session_add(self.tenant_id, primary_key=primary_key)
+        # logger.debug("VCDP session add: %s", rv)
         print(f"Receive SOCKET NAME {self.receive_socket}")
 
         try:
@@ -581,7 +581,7 @@ class DHC4Server:
                     )
 
                     # Add a 3-tuple session so to get DHCP unicast packets
-                    await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
+                    # await self.vpp.vpp_vcdp_session_add(self.tenant_id, 0, interface_info.ip4[0].ip, 17, 0, 67)
 
                 reply = await self.process_packet(db, packet)
                 if not reply:
