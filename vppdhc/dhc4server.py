@@ -237,7 +237,7 @@ class DHC4BindingDatabase(BaseModel):
 
     def broadcast_address(self) -> IPv4Address:
         """Return broadcast address."""
-        return self.prefix.broadcast_address
+        return self.network.broadcast_address
 
     def subnet_mask(self) -> IPv4Address:
         """Return subnet mask."""
@@ -322,7 +322,11 @@ class DHC4BindingDatabase(BaseModel):
 
     def verify_or_extend_lease(self, client_id: bytes, reqip: IPv4Address) -> IPv4Address:
         """Verify or extend a lease."""
-        index = get_ip_index(reqip, self.network)
+        try:
+            index = get_ip_index(reqip, self.network)
+        except ValueError:
+            logger.error("Verify or extend lease: IP %s not in network %s", reqip, self.network)
+            return None
         lease = self.leases[index]
 
         if lease is None:
@@ -359,7 +363,10 @@ class DHC4BindingDatabase(BaseModel):
         return resp
 
     def free_lease(self, client_id: bytes) -> None:
-        index = self.lease_by_client_id[client_id]
+        try:
+            index = self.lease_by_client_id[client_id]
+        except KeyError:
+            return
         del self.lease_by_client_id[client_id]
         self.leases[index] = None
 
@@ -569,6 +576,7 @@ class DHC4Server:
                         leases=[],
                         network=interface_info.ip4[0].network,
                         dns_servers=self.name_server,
+                        lease_time_default=self.lease_time,
                         lease_by_client_id={},
                     )
 
@@ -577,7 +585,7 @@ class DHC4Server:
 
                 reply = await self.process_packet(db, packet)
                 if not reply:
-                    logger.notice("Process packet failed. No reply")
+                    logger.debug("Process packet failed. No reply")
                     continue
 
                 reply = VPPPunt(iface_index=ifindex, action=Actions.PUNT_L2) / reply
