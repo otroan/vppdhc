@@ -29,7 +29,7 @@ from vppdhc.vpppunt import VPPPunt, Actions
 
 logger = logging.getLogger(__name__)
 
-class DHCPv6Server(): # pylint: disable=too-many-instance-attributes
+class DHC6Server(): # pylint: disable=too-many-instance-attributes
     '''DHCPv6 Server'''
     def __init__(self, receive_socket, send_socket, vpp, conf):
         self.receive_socket = receive_socket
