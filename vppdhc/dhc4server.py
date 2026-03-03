@@ -458,7 +458,7 @@ class DHC4Server:
                 # Verifying or extending an existing lease
                 ip = db.verify_or_extend_lease(client_id, reqip)
                 if not ip:
-                    return db.nak(ip, req)
+                    return db.nak(reqip, req)
                 logger.debug("RENEW/REBIND: %s: %s", mac_address, ip)
                 dst_ip = ip
         elif msgtype == 4:  # decline
