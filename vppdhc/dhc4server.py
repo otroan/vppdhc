@@ -326,11 +326,10 @@ class DHC4BindingDatabase(BaseModel):
 
     def verify_or_extend_lease(self, client_id: bytes, reqip: IPv4Address) -> IPv4Address:
         """Verify or extend a lease."""
-        print("*** REQIP ***", reqip)
         index = get_ip_index(reqip, self.network)
         lease = self.leases[index]
 
-        if lease.ip_address != reqip or lease.client_id != client_id:
+        if lease is None or lease.ip_address != reqip or lease.client_id != client_id:
             logger.error("Verify or extend lease with wrong IP %s != %s", lease.ip_address, reqip)
             return None
         lease.last_updated = get_epoch()
@@ -444,7 +443,7 @@ class DHC4Server:
                         "*** ERROR Unknown server id %s expected %s from %s ***",
                         server_id,
                         dhcp_server_ip,
-                        chaddrstr,
+                        mac_address,
                     )
                     return None
 
@@ -582,7 +581,7 @@ class DHC4Server:
                     continue
 
                 reply = VPPPunt(iface_index=ifindex, action=Actions.PUNT_L2) / reply
-                packet_logger.debug("Sending to %s: %s", interface_info.mac, reply.show2(dump=True))
+                packet_logger.debug("Sending to %s: %s", db.mac_address, reply.show2(dump=True))
 
                 await self._writer.send(bytes(reply))
         except asyncio.CancelledError:
