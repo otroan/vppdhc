@@ -230,10 +230,8 @@ class DHC4BindingDatabase(BaseModel):
         if lease.last_updated + self.lease_time_default < get_epoch():
             # Lease expired
             logger.debug("Lease expired: %s", ip)
-            self.leases[index] = None
             try:
                 del self.lease_by_client_id[lease.client_id]
-                del self.leases[index]
             except KeyError:
                 pass
             self.leases[index] = None
@@ -284,6 +282,7 @@ class DHC4BindingDatabase(BaseModel):
 
             logger.error("***Already in use: %s %s", ip, clientid)
             self.probed_duplicates[ip] = get_epoch()
+            self.free_lease(clientid)
         return ip
 
     def release(self, client_id: bytes, ip: IPv4Address) -> None:
@@ -296,7 +295,7 @@ class DHC4BindingDatabase(BaseModel):
 
         logger.debug("Releasing IP address: %s from %s", ip, client_id)
         del self.lease_by_client_id[client_id]
-        del self.leases[index]
+        self.leases[index] = None
 
     def decline(self, client_id: bytes, ip: IPv4Address) -> None:
         """Mark an IP address as declined."""
@@ -307,7 +306,7 @@ class DHC4BindingDatabase(BaseModel):
             return
         logger.error("Releasing IP address: %s from %s", ip, client_id)
         del self.lease_by_client_id[client_id]
-        del self.leases[index]
+        self.leases[index] = None
         self.probed_duplicates[ip] = get_epoch()
 
     def confirm_offer(self, client_id: bytes, ip: IPv4Address) -> IPv4Address:
@@ -364,7 +363,7 @@ class DHC4BindingDatabase(BaseModel):
     def free_lease(self, client_id: bytes) -> None:
         index = self.lease_by_client_id[client_id]
         del self.lease_by_client_id[client_id]
-        del self.leases[index]
+        self.leases[index] = None
 
 
 class DHC4Server:
