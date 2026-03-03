@@ -51,26 +51,15 @@ class DHC6Server(): # pylint: disable=too-many-instance-attributes
         self.if_names = conf.interfaces
         self.if_name = self.if_names[0]
 
-        self.if_index = self.vpp.vpp_interface_name2index(self.if_name)
-        logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
-
         self.preflft = conf.preflft
         self.validlft = conf.validlft
         self.dns = conf.dns
 
-        self.interface_info = self.vpp.vpp_interface_info(self.if_index)
-
-        # Give out addresses from the first prefix configured on the interface
-        self.prefix = self.interface_info.ip6[0].network
-
-        logger.debug(f"Interface info: {self.interface_info}")
-        logger.debug(f'Serving, prefix: {self.prefix} on interface {self.if_name}')
-
-        # Create a DUID-LL with the MAC address
-        self.duid = DUID_LL(lladdr=self.interface_info.mac)
-
-        # Add a route in the MFIB for the all DHCP servers and relays address
-        self.vpp.vpp_ip_multicast_group_join('ff02::1:2')
+        # Async init deferred to listen()
+        self.if_index = None
+        self.interface_info = None
+        self.prefix = None
+        self.duid = None
 
     def mk_address(self, clientduid, iaid):
         '''Create an IPv6 address from the client's DUID and IAID'''
@@ -190,6 +179,19 @@ class DHC6Server(): # pylint: disable=too-many-instance-attributes
 
     async def listen(self):
         '''DHCPv6 Server'''
+
+        self.if_index = await self.vpp.vpp_interface_name2index(self.if_name)
+        logger.debug(f'Getting interface index for: {self.if_name} {self.if_index}')
+
+        self.interface_info = await self.vpp.vpp_interface_info(self.if_index)
+        self.prefix = self.interface_info.ip6[0].network
+        logger.debug(f"Interface info: {self.interface_info}")
+        logger.debug(f'Serving, prefix: {self.prefix} on interface {self.if_name}')
+
+        self.duid = DUID_LL(lladdr=self.interface_info.mac)
+
+        # Add a route in the MFIB for the all DHCP servers and relays address
+        await self.vpp.vpp_ip_multicast_group_join('ff02::1:2')
 
         reader = await asyncio_dgram.bind(self.receive_socket)
         writer = await asyncio_dgram.connect(self.send_socket)
