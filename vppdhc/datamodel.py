@@ -19,6 +19,11 @@ class VPPInterfaceInfo(BaseModel):
     ip6ll: IPv6Address
     duid: bytes = None
 
+    def __str__(self):
+        mac_str = ":".join(f"{b:02x}" for b in self.mac)
+        return (f"ifindex={self.ifindex} name={self.name!r} mac={mac_str} "
+                f"ip4={self.ip4} ip6={self.ip6} ip6ll={self.ip6ll}")
+
 
 @register_vppdb_model("system")
 class ConfSystem(BaseModel):
