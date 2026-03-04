@@ -74,7 +74,7 @@ class IP6NDRA:
                 # If there is longer than 5 seconds until the next periodic RA send RS
                 dstmac = solicit[Ether].src  # pylint: disable=unsubscriptable-object
                 dstip = solicit[IPv6].src  # pylint: disable=unsubscriptable-object
-                logger.debug(f"Sending solicited RA to {dstip} {self.if_name} from" " {interface_info.ip6ll} {dstmac}")
+                logger.debug(f"Sending solicited RA to {dstip} {self.if_name} from {self.interface_info.ip6ll} {dstmac}")
 
             else:
                 dstmac = "33:33:00:00:00:01"

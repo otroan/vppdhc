@@ -147,7 +147,7 @@ class DHC6Server(): # pylint: disable=too-many-instance-attributes
 
     def process_release(self, release, trid):
         '''Process a DHCPv6 Release packet'''
-        logger.error(f'Received DHCPv6 Release {release.show2(dump=True)}')
+        # logger.error(f'Received DHCPv6 Release {release.show2(dump=True)}')
         clientid = release[DHCP6OptClientId]
         clientduid = clientid.duid
 
@@ -163,7 +163,7 @@ class DHC6Server(): # pylint: disable=too-many-instance-attributes
 
     def process_decline(self, decline, trid):
         '''Process a DHCPv6 Decline packet'''
-        logger.error(f'Received DHCPv6 Decline {decline.show2(dump=True)}')
+        # logger.error(f'Received DHCPv6 Decline {decline.show2(dump=True)}')
         clientid = decline[DHCP6OptClientId]
         clientduid = clientid.duid
 

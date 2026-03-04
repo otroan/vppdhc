@@ -278,7 +278,8 @@ class DHC4BindingDatabase(BaseModel):
             if not r:
                 break
 
-            logger.error("***Already in use: %s %s", ip, clientid)
+            mac_str = ":".join(f"{b:02x}" for b in clientid[1:]) if len(clientid) > 1 else clientid.hex()
+            logger.error("***Already in use: %s %s", ip, mac_str)
             self.probed_duplicates[ip] = get_epoch()
             self.free_lease(clientid)
         return ip
@@ -431,7 +432,7 @@ class DHC4Server:
 
         client_id = b"\x01" + mac_bytes if client_id is None else client_id
 
-        reqip = IPv4Address(reqip) if reqip else req[IP].src
+        reqip = IPv4Address(reqip if reqip else req[IP].src)
 
         if msgtype == 1:  # discover
             # Reserve a new address
