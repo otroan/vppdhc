@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """DHCPv4 server."""
 
-# TODO
-# Clean up probed duplicates after timeout
-# Clean up expired leases
-
+import asyncio
 import hashlib
 import logging
 import time
 from enum import Enum
 from ipaddress import IPv4Address, IPv4Network
-
-import asyncio
 
 import asyncio_dgram
 from pydantic import BaseModel, ConfigDict, Field, conint, field_serializer
@@ -38,6 +33,11 @@ class ConfDHC4Server(BaseModel):
     renewal_time: int = Field(alias="renewal-time")
     dns: list[IPv4Address]
     ipv6_only_preferred: bool = Field(alias="ipv6-only-preferred", default=False)
+
+
+OFFERED_LEASE_TTL = 60  # seconds before an unanswered OFFER expires
+PROBE_DUPLICATE_TTL = 300  # seconds before a probed-duplicate entry is retried
+MAX_PROBE_RETRIES = 10  # maximum ARP-probe attempts before giving up
 
 
 class DHC4ServerNoIPaddrAvailableError(Exception):
@@ -186,8 +186,17 @@ class DHC4BindingDatabase(BaseModel):
         self.static_ip(self.server_ip)  # Reserve the router address
         self.probed_duplicates = {}  # Probed duplicates
 
+    def _expire_probed_duplicates(self) -> None:
+        """Remove probed-duplicate entries that are old enough to retry."""
+        now = get_epoch()
+        expired = [ip for ip, ts in self.probed_duplicates.items() if ts + PROBE_DUPLICATE_TTL < now]
+        for ip in expired:
+            logger.debug("Expiring probed duplicate: %s", ip)
+            del self.probed_duplicates[ip]
+
     def get_next_free(self, client_id: bytes, reqip=None) -> IPv4Address:
         """Get the next free IP address."""
+        self._expire_probed_duplicates()
         if client_id in self.lease_by_client_id:
             # Client already has an address. Return the same
             index = self.lease_by_client_id[client_id]
@@ -225,6 +234,14 @@ class DHC4BindingDatabase(BaseModel):
             return False
         if lease.status == DHC4BindingState.RESERVED or lease.last_updated == 0:
             return True
+        if lease.status == DHC4BindingState.OFFERED and lease.last_updated + OFFERED_LEASE_TTL < get_epoch():
+            logger.debug("Offered lease expired: %s", ip)
+            try:
+                del self.lease_by_client_id[lease.client_id]
+            except KeyError:
+                pass
+            self.leases[index] = None
+            return False
         if lease.last_updated + self.lease_time_default < get_epoch():
             # Lease expired
             logger.debug("Lease expired: %s", ip)
@@ -270,19 +287,19 @@ class DHC4BindingDatabase(BaseModel):
 
     async def reserve_with_probe(self, vpp, mac_address, clientid, hostname) -> IPv4Address:
         """Reserve an IP address with probe (OFFER)."""
-        while True:
+        for _ in range(MAX_PROBE_RETRIES):
             ip = self.reserve(mac_address, clientid, hostname)
 
             logger.debug("Probing address: %s", ip)
             r = await vpp.vpp_probe_is_duplicate(self.ifindex, clientid, ip)
             if not r:
-                break
+                return ip
 
             mac_str = ":".join(f"{b:02x}" for b in clientid[1:]) if len(clientid) > 1 else clientid.hex()
             logger.error("***Already in use: %s %s", ip, mac_str)
             self.probed_duplicates[ip] = get_epoch()
             self.free_lease(clientid)
-        return ip
+        raise DHC4ServerNoIPaddrAvailableError
 
     def release(self, client_id: bytes, ip: IPv4Address) -> None:
         """Release an IP address."""
@@ -432,7 +449,7 @@ class DHC4Server:
 
         client_id = b"\x01" + mac_bytes if client_id is None else client_id
 
-        reqip = IPv4Address(reqip if reqip else req[IP].src)
+        reqip = IPv4Address(reqip or req[IP].src)
 
         if msgtype == 1:  # discover
             # Reserve a new address
@@ -441,7 +458,7 @@ class DHC4Server:
                 ip = await db.reserve_with_probe(self.vpp, mac_bytes, client_id, hostname)
                 logger.debug("DISCOVER: %s: %s", mac_address, ip)
             except DHC4ServerNoIPaddrAvailableError:
-                logger.exception("*** ERROR No IP address available for: %s ***", mac_address)
+                logger.error("*** ERROR No IP address available for: %s ***", mac_address)
                 return db.nak(dst_ip, req)
 
         elif msgtype == 3:  # request

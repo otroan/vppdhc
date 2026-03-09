@@ -16,8 +16,8 @@ from vppdhc.dhc4server import DHC4Server
 from vppdhc.dhc6client import DHC6Client
 from vppdhc.dhc6server import DHC6Server
 from vppdhc.raadv import IP6NDRA
-from vppdhc.vppdhcdctl import VPPDHCD
 from vppdhc.vppdb import VPPDB, RootModelBuilder
+from vppdhc.vppdhcdctl import VPPDHCD
 from vppdhc.vpppunt import VPP, VppEnum
 
 app = typer.Typer()

@@ -25,7 +25,7 @@ class RootModelBuilder:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:  # Double-checked locking for thread safety
-                    cls._instance = super(RootModelBuilder, cls).__new__(cls)
+                    cls._instance = super().__new__(cls)
                     cls._instance.fields = {}  # Initialize fields only once
                     cls._instance.root_model = create_model("RootModel")  # Start with an empty root model
         return cls._instance
